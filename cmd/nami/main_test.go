@@ -18,12 +18,12 @@ func TestHelp(t *testing.T) {
 	}
 }
 
-func TestMapIsNotAvailable(t *testing.T) {
+func TestMapRequiresDirectory(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"map", "."}, &stdout, &stderr); code != 2 {
-		t.Fatalf("run(map .) exit code = %d, want 2", code)
+	if code := run([]string{"map"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("run(map) exit code = %d, want 2", code)
 	}
-	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown command: map") {
-		t.Fatalf("run(map .) stdout = %q, stderr = %q", stdout.String(), stderr.String())
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage: nami map <directory>") {
+		t.Fatalf("run(map) stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
 }
