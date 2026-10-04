@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/nami
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Local config / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Nami local data
+.nami/
