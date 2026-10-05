@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -52,7 +53,8 @@ func Open(root string) (*Store, error) {
 	if err := os.MkdirAll(storeDir, 0700); err != nil {
 		return nil, fmt.Errorf("create repository store: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(storeDir, "scans.db"))
+	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(storeDir, "scans.db")), RawQuery: "_foreign_keys=1"}).String()
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open repository store: %w", err)
 	}
@@ -74,9 +76,6 @@ func (s *Store) initialize() error {
 	}
 	if version != 0 && version != schemaVersion {
 		return fmt.Errorf("unsupported store schema version %d (expected %d)", version, schemaVersion)
-	}
-	if _, err := s.db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return fmt.Errorf("enable store foreign keys: %w", err)
 	}
 	var foreignKeys int
 	if err := s.db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil || foreignKeys != 1 {

@@ -144,3 +144,19 @@ func TestEdgeCannotReferenceAnotherScanNode(t *testing.T) {
 		t.Fatalf("cross-scan edge insertion = %v", err)
 	}
 }
+
+func TestNewConnectionEnforcesForeignKeys(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.db.SetMaxIdleConns(0)
+	if open := store.db.Stats().OpenConnections; open != 0 {
+		t.Fatalf("expected original idle connection to close, found %d open", open)
+	}
+	var enabled int
+	if err := store.db.QueryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil || enabled != 1 {
+		t.Fatalf("new connection foreign_keys = %d, %v", enabled, err)
+	}
+}
