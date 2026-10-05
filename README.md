@@ -15,6 +15,25 @@ external imports do not become graph nodes. This phase does not analyze symbols
 or non-Go source. Nami uses the local `go` command to read module paths; mapping
 does not need a network connection.
 
+## Coverage
+
+`COVERAGE status=complete` means Nami found no analysis gaps. A successful map
+with skipped or failed files, unresolved imports, or module errors reports
+`completed_with_gaps` and lists each reason.
+
+File counts cover entries in scanned directories; ignored directories are
+excluded. `supported_source_files` counts Go candidates, including Go files
+skipped because they are not regular files. `files_analyzed` counts Go files
+parsed successfully. `files_failed` counts Go files that could not be read or
+parsed. `files_skipped` counts nonregular entries and unsupported source files.
+
+Import counts cover import declarations in successfully parsed Go files.
+Internal imports are counted when resolved, even if repeated declarations
+produce one graph edge. Standard-library and external imports are classified
+without graph nodes. `cgo_imports` counts the special `C` import;
+`unclassified_imports` records cases where Nami lacks module or standard-library
+information to classify an import.
+
 ## Local checks
 
 Requires Go 1.25 or newer and `make`.
