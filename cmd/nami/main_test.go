@@ -181,3 +181,45 @@ func TestQueryCommandsUseRequestedSnapshot(t *testing.T) {
 		}
 	}
 }
+
+func TestPackagesCommandFoldsStoredFileImports(t *testing.T) {
+	root := t.TempDir()
+	store, err := storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Save(root, analysis.Result{
+		Coverage: analysis.Coverage{Status: "complete"},
+		Graph: graph.Graph{
+			Nodes: []graph.Node{
+				{ID: "package:A", Kind: graph.Package}, {ID: "package:B", Kind: graph.Package},
+				{ID: "file:a.go", Kind: graph.File},
+			},
+			Edges: []graph.Edge{
+				{Kind: graph.Contains, From: "package:A", To: "file:a.go"},
+				{Kind: graph.Imports, From: "file:a.go", To: "package:B"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"packages", root, summary.ID}, &stdout, &stderr); code != 0 {
+		t.Fatalf("packages exit code = %d, stderr = %q", code, stderr.String())
+	}
+	want := "PACKAGE package:A\nPACKAGE package:B\nIMPORTS package:A -> package:B\n"
+	if stdout.String() != want {
+		t.Fatalf("packages output = %q, want %q", stdout.String(), want)
+	}
+	store, err = storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	loaded, err := store.Load(summary.ID)
+	if err != nil || len(loaded.Result.Graph.Edges) != 2 {
+		t.Fatalf("projection changed stored edges: %+v, %v", loaded.Result.Graph.Edges, err)
+	}
+}

@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/gabipuzon/nami/internal/analysis"
+	"github.com/gabipuzon/nami/internal/hierarchy"
 	"github.com/gabipuzon/nami/internal/query"
 	"github.com/gabipuzon/nami/internal/storage"
 )
 
-const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
+const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -81,6 +82,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "STORED_SCAN id=%s root=%s created_at=%s status=%s\n", scan.ID, scan.Root, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
 		printResult(stdout, scan.Result)
+		return 0
+	case "packages":
+		if len(args) != 3 {
+			fmt.Fprintln(stderr, "usage: nami packages <directory> <scan-id>")
+			return 2
+		}
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scan, err := store.Load(args[2])
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		projection, err := hierarchy.ProjectPackages(scan.Result.Graph)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		for _, node := range projection.Graph.Nodes {
+			fmt.Fprintf(stdout, "PACKAGE %s\n", node.ID)
+		}
+		for _, edge := range projection.Graph.Edges {
+			fmt.Fprintf(stdout, "IMPORTS %s -> %s\n", edge.From, edge.To)
+		}
 		return 0
 	case "dependencies", "dependents", "path":
 		wantArgs := 4

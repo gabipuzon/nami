@@ -8,6 +8,7 @@ import (
 type NodeKind string
 
 const (
+	Module  NodeKind = "MODULE"
 	Package NodeKind = "PACKAGE"
 	File    NodeKind = "FILE"
 )

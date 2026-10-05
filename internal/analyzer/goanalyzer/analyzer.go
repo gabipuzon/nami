@@ -83,6 +83,11 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 		issues = append(issues, Issue{Kind: "MODULE_ERROR", Path: ".", Reason: "no go.mod found; internal imports cannot be resolved"})
 	}
 	result := Result{Fragment: graph.Fragment{}}
+	for _, mod := range modules {
+		result.Fragment.Nodes = append(result.Fragment.Nodes, graph.Node{
+			ID: moduleID(mod), Kind: graph.Module, Path: mod.dir, Name: mod.path,
+		})
+	}
 	packages := make(map[string]graph.Node)
 	packagesByDir := make(map[string][]string)
 	packageLookups := make(map[string]packageLookup)
@@ -130,6 +135,9 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 		}
 		mod, moduleKnown := containingModule(dir, modules)
 		parsed = append(parsed, sourceFile{path: rel, imports: imports, moduleKnown: moduleKnown, module: mod})
+		if moduleKnown {
+			result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Contains, From: moduleID(mod), To: packageID})
+		}
 		if !moduleKnown && len(modules) > 0 {
 			issues = append(issues, Issue{Kind: "MODULE_ERROR", Path: rel, Reason: "no enclosing go.mod; internal imports cannot be resolved"})
 		}
@@ -231,6 +239,10 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 	})
 	result.Issues = issues
 	return result
+}
+
+func moduleID(mod module) string {
+	return "module:" + mod.dir + "#" + mod.path
 }
 
 func loadStandardLibrary(root string) (map[string]bool, error) {

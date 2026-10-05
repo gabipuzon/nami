@@ -24,9 +24,11 @@ func TestMapFixture(t *testing.T) {
 		t.Fatal("unchanged repository produced different results")
 	}
 
-	var packages, files, contains, imports int
+	var modules, packages, files, contains, imports int
 	for _, node := range first.Graph.Nodes {
 		switch node.Kind {
+		case graph.Module:
+			modules++
 		case graph.Package:
 			packages++
 		case graph.File:
@@ -44,10 +46,14 @@ func TestMapFixture(t *testing.T) {
 			imports++
 		}
 	}
-	if packages != 4 || files != 5 || contains != 5 || imports != 5 {
-		t.Fatalf("packages=%d files=%d contains=%d imports=%d", packages, files, contains, imports)
+	if modules != 1 || packages != 4 || files != 5 || contains != 9 || imports != 5 {
+		t.Fatalf("modules=%d packages=%d files=%d contains=%d imports=%d", modules, packages, files, contains, imports)
 	}
 	wantEdges := []graph.Edge{
+		{Kind: graph.Contains, From: "module:.#example.com/fixture", To: "package:.#main"},
+		{Kind: graph.Contains, From: "module:.#example.com/fixture", To: "package:alpha#alpha"},
+		{Kind: graph.Contains, From: "module:.#example.com/fixture", To: "package:beta#beta"},
+		{Kind: graph.Contains, From: "module:.#example.com/fixture", To: "package:gamma#gamma"},
 		{Kind: graph.Contains, From: "package:.#main", To: "file:main.go"},
 		{Kind: graph.Contains, From: "package:alpha#alpha", To: "file:alpha/a.go"},
 		{Kind: graph.Contains, From: "package:alpha#alpha", To: "file:alpha/second.go"},
@@ -103,6 +109,39 @@ func TestMapCompleteCoverage(t *testing.T) {
 	}
 	if result.Coverage != want || len(result.Issues) != 0 {
 		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+}
+
+func TestNestedModuleOwnsOnlyItsPackages(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tools", "task"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.mod":             "module example.com/root\ngo 1.25.0\n",
+		"main.go":            "package main\n",
+		"tools/go.mod":       "module example.com/tools\ngo 1.25.0\n",
+		"tools/task/task.go": "package task\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []graph.Edge{
+		{Kind: graph.Contains, From: "module:.#example.com/root", To: "package:.#main"},
+		{Kind: graph.Contains, From: "module:tools#example.com/tools", To: "package:tools/task#task"},
+	}
+	for _, edge := range want {
+		if !containsEdge(result.Graph.Edges, edge) {
+			t.Fatalf("missing module containment %+v", edge)
+		}
+	}
+	if containsEdge(result.Graph.Edges, graph.Edge{Kind: graph.Contains, From: "module:.#example.com/root", To: "package:tools/task#task"}) {
+		t.Fatalf("root module claimed nested package: %+v", result.Graph.Edges)
 	}
 }
 
@@ -291,7 +330,7 @@ func TestMapKeepsValidFilesAfterParseFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 1 || result.Issues[0].Kind != "FAILED_FILE" || result.Issues[0].Path != "broken/bad.go" {
+	if len(result.Graph.Nodes) != 3 || len(result.Issues) != 1 || result.Issues[0].Kind != "FAILED_FILE" || result.Issues[0].Path != "broken/bad.go" {
 		t.Fatalf("result = %+v", result)
 	}
 	if result.Coverage.Status != "completed_with_gaps" || result.Coverage.FilesAnalyzed != 1 || result.Coverage.FilesFailed != 1 || result.Coverage.FilesSkipped != 0 {
@@ -337,7 +376,7 @@ func TestMapReportsSkippedGoSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 1 || result.Issues[0].Path != "linked.go" || result.Issues[0].Kind != "SKIPPED_FILE" {
+	if len(result.Graph.Nodes) != 3 || len(result.Issues) != 1 || result.Issues[0].Path != "linked.go" || result.Issues[0].Kind != "SKIPPED_FILE" {
 		t.Fatalf("result = %+v", result)
 	}
 	if result.Coverage.FilesDiscovered != 3 || result.Coverage.SupportedSourceFiles != 2 || result.Coverage.FilesSkipped != 1 || result.Coverage.FilesAnalyzed != 1 {

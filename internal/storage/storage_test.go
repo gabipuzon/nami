@@ -9,6 +9,7 @@ import (
 
 	"github.com/gabipuzon/nami/internal/analysis"
 	"github.com/gabipuzon/nami/internal/graph"
+	"github.com/gabipuzon/nami/internal/hierarchy"
 )
 
 func TestSnapshotRoundTripAndImmutability(t *testing.T) {
@@ -28,6 +29,15 @@ func TestSnapshotRoundTripAndImmutability(t *testing.T) {
 	if first.Coverage.Status != "completed_with_gaps" || len(first.Issues) == 0 {
 		t.Fatalf("expected partial analysis, got %+v", first)
 	}
+	var moduleID string
+	for _, node := range first.Graph.Nodes {
+		if node.Kind == graph.Module {
+			moduleID = node.ID
+		}
+	}
+	if moduleID == "" {
+		t.Fatal("new analysis omitted module node")
+	}
 	store, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +53,15 @@ func TestSnapshotRoundTripAndImmutability(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loaded.Result, first) || loaded.Root != root || loaded.Status != first.Coverage.Status || loaded.CreatedAt.IsZero() {
 		t.Fatalf("round trip changed snapshot: %+v", loaded)
+	}
+	foundContainment := false
+	for _, edge := range loaded.Result.Graph.Edges {
+		if edge.Kind == graph.Contains && edge.From == moduleID && edge.To == "package:.#main" {
+			foundContainment = true
+		}
+	}
+	if !foundContainment {
+		t.Fatal("module containment did not round trip")
 	}
 	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
 		t.Fatal(err)
@@ -142,6 +161,43 @@ func TestEdgeCannotReferenceAnotherScanNode(t *testing.T) {
 	_, err = store.db.Exec(`INSERT INTO edges VALUES (?, ?, ?, ?)`, first.ID, graph.Imports, "first", "second")
 	if err == nil || !strings.Contains(err.Error(), "FOREIGN KEY") {
 		t.Fatalf("cross-scan edge insertion = %v", err)
+	}
+}
+
+func TestOldSnapshotWithoutModulesStillProjects(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result := analysis.Result{
+		Coverage: analysis.Coverage{Status: "complete"},
+		Graph: graph.Graph{
+			Nodes: []graph.Node{
+				{ID: "A", Kind: graph.Package}, {ID: "B", Kind: graph.Package}, {ID: "F", Kind: graph.File},
+			},
+			Edges: []graph.Edge{
+				{Kind: graph.Contains, From: "A", To: "F"},
+				{Kind: graph.Imports, From: "F", To: "B"},
+			},
+		},
+	}
+	result.Graph, err = graph.Build(graph.Fragment{Nodes: result.Graph.Nodes, Edges: result.Graph.Edges})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Save(root, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(summary.ID)
+	if err != nil || !reflect.DeepEqual(loaded.Result, result) {
+		t.Fatalf("old snapshot changed: %+v, %v", loaded, err)
+	}
+	projection, err := hierarchy.ProjectPackages(loaded.Result.Graph)
+	if err != nil || !reflect.DeepEqual(projection.Graph.Edges, []graph.Edge{{Kind: graph.Imports, From: "A", To: "B"}}) {
+		t.Fatalf("old snapshot projection = %+v, %v", projection, err)
 	}
 }
 
