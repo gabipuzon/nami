@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gabipuzon/nami/internal/analysis"
+	"github.com/gabipuzon/nami/internal/graph"
+	"github.com/gabipuzon/nami/internal/storage"
 )
 
 func TestHelp(t *testing.T) {
@@ -125,5 +129,55 @@ func TestSavedScanCommandsReadStoredResult(t *testing.T) {
 	storedLine, storedResult, ok := strings.Cut(shown.String(), "\n")
 	if !ok || !strings.HasPrefix(storedLine, "STORED_SCAN id="+id) || storedResult != original {
 		t.Fatalf("stored result changed: %q", shown.String())
+	}
+}
+
+func TestQueryCommandsUseRequestedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	store, err := storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := []graph.Node{{ID: "A", Kind: graph.Package}, {ID: "B", Kind: graph.Package}, {ID: "C", Kind: graph.Package}}
+	first, err := store.Save(root, analysis.Result{
+		Coverage: analysis.Coverage{Status: "complete"},
+		Graph:    graph.Graph{Nodes: nodes, Edges: []graph.Edge{{Kind: graph.Imports, From: "A", To: "B"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Save(root, analysis.Result{
+		Coverage: analysis.Coverage{Status: "complete"},
+		Graph:    graph.Graph{Nodes: nodes, Edges: []graph.Edge{{Kind: graph.Imports, From: "A", To: "C"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	for _, test := range []struct {
+		args []string
+		want string
+		code int
+	}{
+		{[]string{"dependencies", root, first.ID, "A"}, "DEPENDENCY B\n", 0},
+		{[]string{"dependencies", root, second.ID, "A"}, "DEPENDENCY C\n", 0},
+		{[]string{"dependents", root, first.ID, "B"}, "DEPENDENT A\n", 0},
+		{[]string{"path", root, first.ID, "A", "B"}, "PATH A\nPATH B\n", 0},
+		{[]string{"path", root, second.ID, "A", "B"}, "NO_PATH\n", 0},
+		{[]string{"dependencies", root, first.ID, "B"}, "dependencies: none\n", 0},
+		{[]string{"dependencies", root, first.ID, "missing"}, `node "missing" not found`, 1},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(test.args, &stdout, &stderr)
+		if code != test.code {
+			t.Fatalf("run(%q) = %d: %q", test.args, code, stderr.String())
+		}
+		got := stdout.String()
+		if code != 0 {
+			got = stderr.String()
+		}
+		if !strings.Contains(got, test.want) || (code == 0 && got != test.want) {
+			t.Fatalf("run(%q) = %q, want %q", test.args, got, test.want)
+		}
 	}
 }

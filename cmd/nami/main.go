@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/gabipuzon/nami/internal/analysis"
+	"github.com/gabipuzon/nami/internal/query"
 	"github.com/gabipuzon/nami/internal/storage"
 )
 
-const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami [--help]\n"
+const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -80,6 +81,59 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "STORED_SCAN id=%s root=%s created_at=%s status=%s\n", scan.ID, scan.Root, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
 		printResult(stdout, scan.Result)
+		return 0
+	case "dependencies", "dependents", "path":
+		wantArgs := 4
+		if args[0] == "path" {
+			wantArgs = 5
+		}
+		if len(args) != wantArgs {
+			if args[0] == "path" {
+				fmt.Fprintln(stderr, "usage: nami path <directory> <scan-id> <from-node-id> <to-node-id>")
+			} else {
+				fmt.Fprintf(stderr, "usage: nami %s <directory> <scan-id> <node-id>\n", args[0])
+			}
+			return 2
+		}
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scan, err := store.Load(args[2])
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		var ids []string
+		switch args[0] {
+		case "dependencies":
+			ids, err = query.Dependencies(scan.Result.Graph, args[3])
+		case "dependents":
+			ids, err = query.Dependents(scan.Result.Graph, args[3])
+		case "path":
+			ids, err = query.Path(scan.Result.Graph, args[3], args[4])
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if len(ids) == 0 {
+			switch args[0] {
+			case "dependencies":
+				fmt.Fprintln(stdout, "dependencies: none")
+			case "dependents":
+				fmt.Fprintln(stdout, "dependents: none")
+			case "path":
+				fmt.Fprintln(stdout, "NO_PATH")
+			}
+			return 0
+		}
+		prefix := map[string]string{"dependencies": "DEPENDENCY", "dependents": "DEPENDENT", "path": "PATH"}[args[0]]
+		for _, id := range ids {
+			fmt.Fprintf(stdout, "%s %s\n", prefix, id)
+		}
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n%s", args[0], usage)
