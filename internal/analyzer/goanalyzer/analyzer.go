@@ -45,15 +45,20 @@ type sourceFile struct {
 	path        string
 	imports     []string
 	moduleKnown bool
+	module      module
 }
 
 type module struct {
-	dir  string
-	path string
+	dir      string
+	path     string
+	requires map[string]bool
+	replaced map[string]bool
+	excluded map[string]bool
 }
 
 func Analyze(root string, goFiles, scannedFiles []string) Result {
 	modules, issues := loadModules(root, scannedFiles)
+	workspaceActive, workspaceErr := activeWorkspace(root)
 	standard := make(map[string]bool)
 	var stdErr error
 	if len(goFiles) > 0 {
@@ -110,7 +115,7 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 			imports = append(imports, importPath)
 		}
 		mod, moduleKnown := containingModule(dir, modules)
-		parsed = append(parsed, sourceFile{path: rel, imports: imports, moduleKnown: moduleKnown})
+		parsed = append(parsed, sourceFile{path: rel, imports: imports, moduleKnown: moduleKnown, module: mod})
 		if !moduleKnown && len(modules) > 0 {
 			issues = append(issues, Issue{Kind: "MODULE_ERROR", Path: rel, Reason: "no enclosing go.mod; internal imports cannot be resolved"})
 		}
@@ -156,14 +161,23 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 			if internalModule(imp, modules) {
 				result.Imports.Unresolved++
 				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "internal package not found or could not be analyzed"})
-			} else if stdErr != nil && !strings.Contains(strings.Split(imp, "/")[0], ".") {
+			} else if stdErr != nil {
 				result.Imports.Unclassified++
 				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "standard-library list unavailable"})
-			} else if strings.Contains(strings.Split(imp, "/")[0], ".") && !strings.HasPrefix(imp, ".") {
-				result.Imports.External++
+			} else if externalDependency(imp, file.module) {
+				if workspaceErr != nil || workspaceActive {
+					result.Imports.Unclassified++
+					reason := "Go workspace may override the declared dependency"
+					if workspaceErr != nil {
+						reason = "Go workspace status unavailable: " + workspaceErr.Error()
+					}
+					issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: reason})
+				} else {
+					result.Imports.External++
+				}
 			} else {
-				result.Imports.Unresolved++
-				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "not a known standard-library or internal package"})
+				result.Imports.Unclassified++
+				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "no evidence of a standard-library, repository, or external dependency"})
 			}
 		}
 	}
@@ -187,7 +201,7 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 func loadStandardLibrary(root string) (map[string]bool, error) {
 	command := exec.Command("go", "list", "-e", "std")
 	command.Dir = root
-	command.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off")
+	command.Env = append(os.Environ(), "GO111MODULE=off", "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off")
 	output, err := command.Output()
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
@@ -200,6 +214,18 @@ func loadStandardLibrary(root string) (map[string]bool, error) {
 		standard[importPath] = true
 	}
 	return standard, nil
+}
+
+func activeWorkspace(root string) (bool, error) {
+	command := exec.Command("go", "env", "GOWORK")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOPROXY=off")
+	output, err := command.Output()
+	if err != nil {
+		return false, err
+	}
+	workspace := strings.TrimSpace(string(output))
+	return workspace != "" && workspace != "off", nil
 }
 
 func loadModules(root string, scannedFiles []string) ([]module, []Issue) {
@@ -223,13 +249,29 @@ func loadModules(root string, scannedFiles []string) ([]module, []Issue) {
 			continue
 		}
 		var data struct {
-			Module *struct{ Path string }
+			Module  *struct{ Path string }
+			Require []struct{ Path string }
+			Replace []struct{ Old struct{ Path string } }
+			Exclude []struct{ Path string }
 		}
 		if err := json.Unmarshal(output, &data); err != nil || data.Module == nil || data.Module.Path == "" {
 			issues = append(issues, Issue{Kind: "MODULE_ERROR", Path: rel, Reason: "module path unavailable"})
 			continue
 		}
-		modules = append(modules, module{dir: dir, path: data.Module.Path})
+		mod := module{
+			dir: dir, path: data.Module.Path,
+			requires: make(map[string]bool), replaced: make(map[string]bool), excluded: make(map[string]bool),
+		}
+		for _, required := range data.Require {
+			mod.requires[required.Path] = true
+		}
+		for _, replacement := range data.Replace {
+			mod.replaced[replacement.Old.Path] = true
+		}
+		for _, exclusion := range data.Exclude {
+			mod.excluded[exclusion.Path] = true
+		}
+		modules = append(modules, mod)
 	}
 	sort.Slice(modules, func(i, j int) bool { return len(modules[i].dir) > len(modules[j].dir) })
 	return modules, issues
@@ -260,6 +302,16 @@ func internalModule(importPath string, modules []module) bool {
 		}
 	}
 	return false
+}
+
+func externalDependency(importPath string, mod module) bool {
+	longest := ""
+	for required := range mod.requires {
+		if (importPath == required || strings.HasPrefix(importPath, required+"/")) && len(required) > len(longest) {
+			longest = required
+		}
+	}
+	return longest != "" && !mod.replaced[longest] && !mod.excluded[longest]
 }
 
 func unique(ids []string) []string {

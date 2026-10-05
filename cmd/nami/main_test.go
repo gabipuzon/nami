@@ -44,7 +44,8 @@ func TestMapReportsCoverageDeterministically(t *testing.T) {
 	for _, want := range []string{
 		"COVERAGE status=completed_with_gaps",
 		"files_discovered=8 supported_source_files=5 files_analyzed=5 files_skipped=1 files_failed=0",
-		"imports_discovered=8 internal_imports_resolved=5 standard_library_imports=1 external_imports=1 unresolved_imports=1",
+		"imports_discovered=8 internal_imports_resolved=5 standard_library_imports=1 external_imports=0 unresolved_imports=1 cgo_imports=0 unclassified_imports=1",
+		"UNCLASSIFIED_IMPORT main.go \"github.com/external/thing\"",
 		"UNRESOLVED_IMPORT alpha/second.go",
 		"UNSUPPORTED_FILE notes.py",
 	} {

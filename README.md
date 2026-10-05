@@ -29,10 +29,11 @@ parsed. `files_skipped` counts nonregular entries and unsupported source files.
 
 Import counts cover import declarations in successfully parsed Go files.
 Internal imports are counted when resolved, even if repeated declarations
-produce one graph edge. Standard-library and external imports are classified
-without graph nodes. `cgo_imports` counts the special `C` import;
-`unclassified_imports` records cases where Nami lacks module or standard-library
-information to classify an import.
+produce one graph edge. Standard-library imports come from Go's package list;
+external imports require an unreplaced, unexcluded dependency declared in
+`go.mod` with no active Go workspace.
+`cgo_imports` counts the special `C` import. Imports without enough evidence
+are `unclassified_imports` and include a reason.
 
 ## Local checks
 

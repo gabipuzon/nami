@@ -64,14 +64,14 @@ func TestMapFixture(t *testing.T) {
 			t.Errorf("missing edge %+v", want)
 		}
 	}
-	if len(first.Issues) != 2 || first.Issues[0].Kind != "UNRESOLVED_IMPORT" || first.Issues[0].Import != "example.com/fixture/missing" || first.Issues[1].Kind != "UNSUPPORTED_FILE" || first.Issues[1].Path != "notes.py" {
+	if len(first.Issues) != 3 || first.Issues[0].Kind != "UNCLASSIFIED_IMPORT" || first.Issues[0].Import != "github.com/external/thing" || first.Issues[1].Kind != "UNRESOLVED_IMPORT" || first.Issues[1].Import != "example.com/fixture/missing" || first.Issues[2].Kind != "UNSUPPORTED_FILE" || first.Issues[2].Path != "notes.py" {
 		t.Fatalf("issues = %+v", first.Issues)
 	}
 	wantCoverage := Coverage{
 		Status: "completed_with_gaps", FilesDiscovered: 8, SupportedSourceFiles: 5,
 		FilesAnalyzed: 5, FilesSkipped: 1, FilesFailed: 0,
 		ImportsDiscovered: 8, InternalResolved: 5, StandardLibrary: 1,
-		External: 1, Unresolved: 1,
+		Unresolved: 1, Unclassified: 1,
 	}
 	if first.Coverage != wantCoverage {
 		t.Fatalf("coverage = %+v, want %+v", first.Coverage, wantCoverage)
@@ -84,7 +84,7 @@ func TestMapCompleteCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
-		"go.mod":     "module example.com/clean\n",
+		"go.mod":     "module example.com/clean\nrequire github.com/external/thing v1.0.0\n",
 		"main.go":    "package main\nimport (\"fmt\"; \"example.com/clean/lib\"; \"github.com/external/thing\")\n",
 		"lib/lib.go": "package lib\n",
 	} {
@@ -103,6 +103,65 @@ func TestMapCompleteCoverage(t *testing.T) {
 	}
 	if result.Coverage != want || len(result.Issues) != 0 {
 		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+}
+
+func TestReplacedDependencyIsNotClassifiedExternal(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/replaced\nrequire github.com/external/thing v1.0.0\nreplace github.com/external/thing => ./local\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nimport \"github.com/external/thing\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.External != 0 || result.Coverage.Unclassified != 1 || len(result.Issues) != 1 || result.Issues[0].Kind != "UNCLASSIFIED_IMPORT" {
+		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+}
+
+func TestWorkspaceDependencyIsNotClassifiedExternal(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module example.com/workspace\nrequire github.com/external/thing v1.0.0\n",
+		"go.work": "go 1.25.0\nuse .\n",
+		"main.go": "package main\nimport \"github.com/external/thing\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.External != 0 || result.Coverage.Unclassified != 1 || len(result.Issues) != 1 || result.Issues[0].Kind != "UNCLASSIFIED_IMPORT" {
+		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+}
+
+func TestUndeclaredImportsAreUnclassifiedRegardlessOfPathShape(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/unknown\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nimport (\"github.com/unknown/pkg\"; \"mystery/pkg\")\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.External != 0 || result.Coverage.Unresolved != 0 || result.Coverage.Unclassified != 2 || len(result.Issues) != 2 {
+		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+	for _, issue := range result.Issues {
+		if issue.Kind != "UNCLASSIFIED_IMPORT" || issue.Reason == "" {
+			t.Fatalf("issue = %+v", issue)
+		}
 	}
 }
 
