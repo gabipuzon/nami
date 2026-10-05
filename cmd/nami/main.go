@@ -4,18 +4,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/gabipuzon/nami/internal/analysis"
+	"github.com/gabipuzon/nami/internal/storage"
 )
 
-const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami [--help]\n"
+const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami [--help]\n"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
-	if args[0] == "map" {
+	switch args[0] {
+	case "map":
 		if len(args) != 2 {
 			fmt.Fprintln(stderr, "usage: nami map <directory>")
 			return 2
@@ -25,30 +28,85 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		for _, node := range result.Graph.Nodes {
-			fmt.Fprintf(stdout, "%s %s %s\n", node.Kind, node.ID, node.Name)
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
-		for _, edge := range result.Graph.Edges {
-			fmt.Fprintf(stdout, "%s %s -> %s\n", edge.Kind, edge.From, edge.To)
+		scan, err := store.Save(args[1], result)
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
-		coverage := result.Coverage
-		fmt.Fprintf(stdout, "COVERAGE status=%s\n", coverage.Status)
-		fmt.Fprintf(stdout, "COVERAGE files_discovered=%d supported_source_files=%d files_analyzed=%d files_skipped=%d files_failed=%d\n",
-			coverage.FilesDiscovered, coverage.SupportedSourceFiles, coverage.FilesAnalyzed, coverage.FilesSkipped, coverage.FilesFailed)
-		fmt.Fprintf(stdout, "COVERAGE imports_discovered=%d internal_imports_resolved=%d standard_library_imports=%d external_imports=%d unresolved_imports=%d cgo_imports=%d unclassified_imports=%d\n",
-			coverage.ImportsDiscovered, coverage.InternalResolved, coverage.StandardLibrary, coverage.External, coverage.Unresolved, coverage.Cgo, coverage.Unclassified)
-		for _, issue := range result.Issues {
-			if issue.Import == "" {
-				fmt.Fprintf(stdout, "%s %s: %s\n", issue.Kind, issue.Path, issue.Reason)
-			} else {
-				fmt.Fprintf(stdout, "%s %s %q: %s\n", issue.Kind, issue.Path, issue.Import, issue.Reason)
-			}
+		fmt.Fprintf(stdout, "SAVED_SCAN id=%s created_at=%s status=%s\n", scan.ID, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
+		printResult(stdout, result)
+		return 0
+	case "scans":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: nami scans <directory>")
+			return 2
+		}
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scans, err := store.List()
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		for _, scan := range scans {
+			fmt.Fprintf(stdout, "SAVED_SCAN id=%s created_at=%s status=%s\n", scan.ID, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
 		}
 		return 0
+	case "show":
+		if len(args) != 3 {
+			fmt.Fprintln(stderr, "usage: nami show <directory> <scan-id>")
+			return 2
+		}
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scan, err := store.Load(args[2])
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "STORED_SCAN id=%s root=%s created_at=%s status=%s\n", scan.ID, scan.Root, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
+		printResult(stdout, scan.Result)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown command: %s\n\n%s", args[0], usage)
+		return 2
 	}
+}
 
-	fmt.Fprintf(stderr, "unknown command: %s\n\n%s", args[0], usage)
-	return 2
+func printResult(stdout io.Writer, result analysis.Result) {
+	for _, node := range result.Graph.Nodes {
+		fmt.Fprintf(stdout, "%s %s %s\n", node.Kind, node.ID, node.Name)
+	}
+	for _, edge := range result.Graph.Edges {
+		fmt.Fprintf(stdout, "%s %s -> %s\n", edge.Kind, edge.From, edge.To)
+	}
+	coverage := result.Coverage
+	fmt.Fprintf(stdout, "COVERAGE status=%s\n", coverage.Status)
+	fmt.Fprintf(stdout, "COVERAGE files_discovered=%d supported_source_files=%d files_analyzed=%d files_skipped=%d files_failed=%d\n",
+		coverage.FilesDiscovered, coverage.SupportedSourceFiles, coverage.FilesAnalyzed, coverage.FilesSkipped, coverage.FilesFailed)
+	fmt.Fprintf(stdout, "COVERAGE imports_discovered=%d internal_imports_resolved=%d standard_library_imports=%d external_imports=%d unresolved_imports=%d cgo_imports=%d unclassified_imports=%d\n",
+		coverage.ImportsDiscovered, coverage.InternalResolved, coverage.StandardLibrary, coverage.External, coverage.Unresolved, coverage.Cgo, coverage.Unclassified)
+	for _, issue := range result.Issues {
+		if issue.Import == "" {
+			fmt.Fprintf(stdout, "%s %s: %s\n", issue.Kind, issue.Path, issue.Reason)
+		} else {
+			fmt.Fprintf(stdout, "%s %s %q: %s\n", issue.Kind, issue.Path, issue.Import, issue.Reason)
+		}
+	}
 }
 
 func main() {
