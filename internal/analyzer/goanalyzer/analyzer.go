@@ -2,6 +2,7 @@ package goanalyzer
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
@@ -22,6 +23,24 @@ type Issue struct {
 	Reason string
 }
 
+type ImportCounts struct {
+	Discovered       int
+	InternalResolved int
+	StandardLibrary  int
+	External         int
+	Unresolved       int
+	Cgo              int
+	Unclassified     int
+}
+
+type Result struct {
+	Fragment      graph.Fragment
+	Issues        []Issue
+	FilesAnalyzed int
+	FilesFailed   int
+	Imports       ImportCounts
+}
+
 type sourceFile struct {
 	path        string
 	imports     []string
@@ -33,12 +52,20 @@ type module struct {
 	path string
 }
 
-func Analyze(root string, goFiles, scannedFiles []string) (graph.Fragment, []Issue) {
+func Analyze(root string, goFiles, scannedFiles []string) Result {
 	modules, issues := loadModules(root, scannedFiles)
+	standard := make(map[string]bool)
+	var stdErr error
+	if len(goFiles) > 0 {
+		standard, stdErr = loadStandardLibrary(root)
+		if stdErr != nil {
+			issues = append(issues, Issue{Kind: "IMPORT_CLASSIFICATION_ERROR", Path: ".", Reason: stdErr.Error()})
+		}
+	}
 	if len(goFiles) > 0 && len(modules) == 0 && !hasGoMod(scannedFiles) {
 		issues = append(issues, Issue{Kind: "MODULE_ERROR", Path: ".", Reason: "no go.mod found; internal imports cannot be resolved"})
 	}
-	fragment := graph.Fragment{}
+	result := Result{Fragment: graph.Fragment{}}
 	packages := make(map[string]graph.Node)
 	importable := make(map[string][]string)
 	var parsed []sourceFile
@@ -46,14 +73,17 @@ func Analyze(root string, goFiles, scannedFiles []string) (graph.Fragment, []Iss
 	for _, rel := range goFiles {
 		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			issues = append(issues, Issue{Kind: "SKIPPED_FILE", Path: rel, Reason: err.Error()})
+			result.FilesFailed++
+			issues = append(issues, Issue{Kind: "FAILED_FILE", Path: rel, Reason: err.Error()})
 			continue
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), rel, content, parser.AllErrors)
 		if err != nil {
-			issues = append(issues, Issue{Kind: "SKIPPED_FILE", Path: rel, Reason: err.Error()})
+			result.FilesFailed++
+			issues = append(issues, Issue{Kind: "FAILED_FILE", Path: rel, Reason: err.Error()})
 			continue
 		}
+		result.FilesAnalyzed++
 
 		dir := path.Dir(rel)
 		packageID := "package:" + dir + "#" + file.Name.Name
@@ -61,19 +91,23 @@ func Analyze(root string, goFiles, scannedFiles []string) (graph.Fragment, []Iss
 			packages[packageID] = graph.Node{ID: packageID, Kind: graph.Package, Path: dir, Name: file.Name.Name}
 		}
 		fileID := "file:" + rel
-		fragment.Nodes = append(fragment.Nodes, graph.Node{ID: fileID, Kind: graph.File, Path: rel, Name: path.Base(rel)})
-		fragment.Edges = append(fragment.Edges, graph.Edge{Kind: graph.Contains, From: packageID, To: fileID})
+		result.Fragment.Nodes = append(result.Fragment.Nodes, graph.Node{ID: fileID, Kind: graph.File, Path: rel, Name: path.Base(rel)})
+		result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Contains, From: packageID, To: fileID})
 
 		var imports []string
 		for _, imp := range file.Imports {
+			result.Imports.Discovered++
 			importPath, err := strconv.Unquote(imp.Path.Value)
 			if err != nil {
+				result.Imports.Unresolved++
 				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: rel, Import: imp.Path.Value, Reason: "invalid import path literal"})
 				continue
 			}
-			if importPath != "C" {
-				imports = append(imports, importPath)
+			if importPath == "C" {
+				result.Imports.Cgo++
+				continue
 			}
+			imports = append(imports, importPath)
 		}
 		mod, moduleKnown := containingModule(dir, modules)
 		parsed = append(parsed, sourceFile{path: rel, imports: imports, moduleKnown: moduleKnown})
@@ -97,25 +131,39 @@ func Analyze(root string, goFiles, scannedFiles []string) (graph.Fragment, []Iss
 	}
 
 	for _, pkg := range packages {
-		fragment.Nodes = append(fragment.Nodes, pkg)
+		result.Fragment.Nodes = append(result.Fragment.Nodes, pkg)
 	}
 	for _, file := range parsed {
 		for _, imp := range file.imports {
+			if standard[imp] {
+				result.Imports.StandardLibrary++
+				continue
+			}
 			if !file.moduleKnown {
-				if internalModule(imp, modules) || strings.Contains(strings.Split(imp, "/")[0], ".") {
-					issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "repository module path unavailable"})
-				}
+				result.Imports.Unclassified++
+				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "repository module path unavailable"})
 				continue
 			}
 			if targets := unique(importable[imp]); len(targets) == 1 {
-				fragment.Edges = append(fragment.Edges, graph.Edge{Kind: graph.Imports, From: "file:" + file.path, To: targets[0]})
+				result.Imports.InternalResolved++
+				result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Imports, From: "file:" + file.path, To: targets[0]})
 				continue
 			} else if len(targets) > 1 {
+				result.Imports.Unresolved++
 				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "multiple internal packages match"})
 				continue
 			}
 			if internalModule(imp, modules) {
+				result.Imports.Unresolved++
 				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "internal package not found or could not be analyzed"})
+			} else if stdErr != nil && !strings.Contains(strings.Split(imp, "/")[0], ".") {
+				result.Imports.Unclassified++
+				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "standard-library list unavailable"})
+			} else if strings.Contains(strings.Split(imp, "/")[0], ".") && !strings.HasPrefix(imp, ".") {
+				result.Imports.External++
+			} else {
+				result.Imports.Unresolved++
+				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "not a known standard-library or internal package"})
 			}
 		}
 	}
@@ -132,7 +180,26 @@ func Analyze(root string, goFiles, scannedFiles []string) (graph.Fragment, []Iss
 		}
 		return a.Reason < b.Reason
 	})
-	return fragment, issues
+	result.Issues = issues
+	return result
+}
+
+func loadStandardLibrary(root string) (map[string]bool, error) {
+	command := exec.Command("go", "list", "-e", "std")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off")
+	output, err := command.Output()
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("load standard-library packages: %s", strings.TrimSpace(string(exit.Stderr)))
+		}
+		return nil, fmt.Errorf("load standard-library packages: %w", err)
+	}
+	standard := make(map[string]bool)
+	for _, importPath := range strings.Fields(string(output)) {
+		standard[importPath] = true
+	}
+	return standard, nil
 }
 
 func loadModules(root string, scannedFiles []string) ([]module, []Issue) {

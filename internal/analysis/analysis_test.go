@@ -67,6 +67,43 @@ func TestMapFixture(t *testing.T) {
 	if len(first.Issues) != 2 || first.Issues[0].Kind != "UNRESOLVED_IMPORT" || first.Issues[0].Import != "example.com/fixture/missing" || first.Issues[1].Kind != "UNSUPPORTED_FILE" || first.Issues[1].Path != "notes.py" {
 		t.Fatalf("issues = %+v", first.Issues)
 	}
+	wantCoverage := Coverage{
+		Status: "completed_with_gaps", FilesDiscovered: 8, SupportedSourceFiles: 5,
+		FilesAnalyzed: 5, FilesSkipped: 1, FilesFailed: 0,
+		ImportsDiscovered: 8, InternalResolved: 5, StandardLibrary: 1,
+		External: 1, Unresolved: 1,
+	}
+	if first.Coverage != wantCoverage {
+		t.Fatalf("coverage = %+v, want %+v", first.Coverage, wantCoverage)
+	}
+}
+
+func TestMapCompleteCoverage(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "lib"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.mod":     "module example.com/clean\n",
+		"main.go":    "package main\nimport (\"fmt\"; \"example.com/clean/lib\"; \"github.com/external/thing\")\n",
+		"lib/lib.go": "package lib\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Coverage{
+		Status: "complete", FilesDiscovered: 3, SupportedSourceFiles: 2,
+		FilesAnalyzed: 2, ImportsDiscovered: 3, InternalResolved: 1,
+		StandardLibrary: 1, External: 1,
+	}
+	if result.Coverage != want || len(result.Issues) != 0 {
+		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
 }
 
 func TestMapKeepsValidFilesAfterParseFailure(t *testing.T) {
@@ -74,18 +111,26 @@ func TestMapKeepsValidFilesAfterParseFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/partial\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "good.go"), []byte("package good\n"), 0600); err != nil {
+	for _, dir := range []string{"good", "broken"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "good", "good.go"), []byte("package good\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "bad.go"), []byte("package\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "broken", "bad.go"), []byte("package\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	result, err := Map(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 1 || result.Issues[0].Kind != "SKIPPED_FILE" {
+	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 1 || result.Issues[0].Kind != "FAILED_FILE" || result.Issues[0].Path != "broken/bad.go" {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.Coverage.Status != "completed_with_gaps" || result.Coverage.FilesAnalyzed != 1 || result.Coverage.FilesFailed != 1 || result.Coverage.FilesSkipped != 0 {
+		t.Fatalf("coverage = %+v", result.Coverage)
 	}
 }
 
@@ -97,15 +142,18 @@ func TestMapMissingDirectory(t *testing.T) {
 
 func TestMapWithoutModuleReportsResolutionLimit(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\nimport (\"fmt\"; \"example.com/unknown\")\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	result, err := Map(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 1 || result.Issues[0].Kind != "MODULE_ERROR" {
+	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 2 || result.Issues[0].Kind != "MODULE_ERROR" || result.Issues[1].Kind != "UNCLASSIFIED_IMPORT" {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.Coverage.ImportsDiscovered != 2 || result.Coverage.StandardLibrary != 1 || result.Coverage.Unclassified != 1 {
+		t.Fatalf("coverage = %+v", result.Coverage)
 	}
 }
 
@@ -126,6 +174,9 @@ func TestMapReportsSkippedGoSymlink(t *testing.T) {
 	}
 	if len(result.Graph.Nodes) != 2 || len(result.Issues) != 1 || result.Issues[0].Path != "linked.go" || result.Issues[0].Kind != "SKIPPED_FILE" {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.Coverage.FilesDiscovered != 3 || result.Coverage.SupportedSourceFiles != 2 || result.Coverage.FilesSkipped != 1 || result.Coverage.FilesAnalyzed != 1 {
+		t.Fatalf("coverage = %+v", result.Coverage)
 	}
 }
 

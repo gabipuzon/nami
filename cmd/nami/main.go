@@ -31,6 +31,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		for _, edge := range result.Graph.Edges {
 			fmt.Fprintf(stdout, "%s %s -> %s\n", edge.Kind, edge.From, edge.To)
 		}
+		coverage := result.Coverage
+		fmt.Fprintf(stdout, "COVERAGE status=%s\n", coverage.Status)
+		fmt.Fprintf(stdout, "COVERAGE files_discovered=%d supported_source_files=%d files_analyzed=%d files_skipped=%d files_failed=%d\n",
+			coverage.FilesDiscovered, coverage.SupportedSourceFiles, coverage.FilesAnalyzed, coverage.FilesSkipped, coverage.FilesFailed)
+		fmt.Fprintf(stdout, "COVERAGE imports_discovered=%d internal_imports_resolved=%d standard_library_imports=%d external_imports=%d unresolved_imports=%d cgo_imports=%d unclassified_imports=%d\n",
+			coverage.ImportsDiscovered, coverage.InternalResolved, coverage.StandardLibrary, coverage.External, coverage.Unresolved, coverage.Cgo, coverage.Unclassified)
 		for _, issue := range result.Issues {
 			if issue.Import == "" {
 				fmt.Fprintf(stdout, "%s %s: %s\n", issue.Kind, issue.Path, issue.Reason)

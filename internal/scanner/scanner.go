@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 var ignoredDirectories = map[string]bool{
@@ -20,8 +19,9 @@ type Skipped struct {
 }
 
 type Result struct {
-	Files   []string
-	Skipped []Skipped
+	Discovered int
+	Files      []string
+	Skipped    []Skipped
 }
 
 // Scan discovers regular files without interpreting their contents.
@@ -45,15 +45,14 @@ func Scan(root string) (Result, error) {
 			}
 			return nil
 		}
+		result.Discovered++
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
 		if !entry.Type().IsRegular() {
-			if strings.HasSuffix(rel, ".go") {
-				result.Skipped = append(result.Skipped, Skipped{Path: rel, Reason: "not a regular file"})
-			}
+			result.Skipped = append(result.Skipped, Skipped{Path: rel, Reason: "not a regular file"})
 			return nil
 		}
 		result.Files = append(result.Files, rel)
