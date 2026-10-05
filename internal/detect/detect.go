@@ -21,7 +21,8 @@ func UnsupportedSources(files []string) []string {
 	var unsupported []string
 	for _, file := range files {
 		switch strings.ToLower(path.Ext(file)) {
-		case ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts":
+		case ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
+			".rs", ".java", ".rb", ".c", ".cpp", ".cs", ".php", ".swift", ".kt":
 			unsupported = append(unsupported, file)
 		}
 	}

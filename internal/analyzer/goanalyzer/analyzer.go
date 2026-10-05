@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"nami/internal/graph"
+	"github.com/gabipuzon/nami/internal/graph"
 )
 
 type Issue struct {
@@ -56,9 +56,21 @@ type module struct {
 	excluded map[string]bool
 }
 
+type packageLookup struct {
+	dir                 string
+	name                string
+	reason              string
+	metadataUnavailable bool
+}
+
+type workspaceState struct {
+	active         bool
+	sourceIncluded bool
+	err            error
+}
+
 func Analyze(root string, goFiles, scannedFiles []string) Result {
 	modules, issues := loadModules(root, scannedFiles)
-	workspaceActive, workspaceErr := activeWorkspace(root)
 	standard := make(map[string]bool)
 	var stdErr error
 	if len(goFiles) > 0 {
@@ -72,7 +84,9 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 	}
 	result := Result{Fragment: graph.Fragment{}}
 	packages := make(map[string]graph.Node)
-	importable := make(map[string][]string)
+	packagesByDir := make(map[string][]string)
+	packageLookups := make(map[string]packageLookup)
+	workspaceStates := make(map[string]workspaceState)
 	var parsed []sourceFile
 
 	for _, rel := range goFiles {
@@ -120,18 +134,8 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 			issues = append(issues, Issue{Kind: "MODULE_ERROR", Path: rel, Reason: "no enclosing go.mod; internal imports cannot be resolved"})
 		}
 
-		if !strings.HasSuffix(file.Name.Name, "_test") {
-			if moduleKnown {
-				importPath := mod.path
-				if dir != mod.dir {
-					if mod.dir == "." {
-						importPath += "/" + dir
-					} else {
-						importPath += "/" + strings.TrimPrefix(dir, mod.dir+"/")
-					}
-				}
-				importable[importPath] = append(importable[importPath], packageID)
-			}
+		if moduleKnown && !strings.HasSuffix(file.Name.Name, "_test") {
+			packagesByDir[dir] = append(packagesByDir[dir], packageID)
 		}
 	}
 
@@ -149,27 +153,52 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "repository module path unavailable"})
 				continue
 			}
-			if targets := unique(importable[imp]); len(targets) == 1 {
-				result.Imports.InternalResolved++
-				result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Imports, From: "file:" + file.path, To: targets[0]})
-				continue
-			} else if len(targets) > 1 {
+			lookup := resolveLocalPackage(root, file.module, imp, packageLookups, workspaceStates)
+			if lookup.metadataUnavailable {
+				lookup = sameModulePackage(root, file.module, imp, modules, workspaceStates)
+			}
+			if lookup.dir != "" {
+				var matching []string
+				for _, id := range packagesByDir[lookup.dir] {
+					if lookup.name == "" || packages[id].Name == lookup.name {
+						matching = append(matching, id)
+					}
+				}
+				targets := unique(matching)
+				if len(targets) == 1 {
+					result.Imports.InternalResolved++
+					result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Imports, From: "file:" + file.path, To: targets[0]})
+					continue
+				}
 				result.Imports.Unresolved++
-				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "multiple internal packages match"})
+				reason := "local package not found or could not be analyzed"
+				if len(targets) > 1 {
+					reason = "multiple local packages match"
+				}
+				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: reason})
 				continue
 			}
-			if internalModule(imp, modules) {
+			if hasImportPrefix(imp, file.module.path) && !shadowedModuleImport(imp, file.module) {
 				result.Imports.Unresolved++
-				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: "internal package not found or could not be analyzed"})
-			} else if stdErr != nil {
+				reason := "same-module package not found or could not be analyzed"
+				if lookup.reason != "" {
+					reason = lookup.reason
+				}
+				issues = append(issues, Issue{Kind: "UNRESOLVED_IMPORT", Path: file.path, Import: imp, Reason: reason})
+				continue
+			}
+			if stdErr != nil {
 				result.Imports.Unclassified++
 				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "standard-library list unavailable"})
 			} else if externalDependency(imp, file.module) {
-				if workspaceErr != nil || workspaceActive {
+				workspace := workspaceForModule(root, file.module, workspaceStates)
+				if workspace.err != nil || workspace.active {
 					result.Imports.Unclassified++
 					reason := "Go workspace may override the declared dependency"
-					if workspaceErr != nil {
-						reason = "Go workspace status unavailable: " + workspaceErr.Error()
+					if workspace.err != nil {
+						reason = "Go workspace status unavailable: " + workspace.err.Error()
+					} else if !workspace.sourceIncluded {
+						reason = "source module is not included in active Go workspace"
 					}
 					issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: reason})
 				} else {
@@ -177,7 +206,13 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 				}
 			} else {
 				result.Imports.Unclassified++
-				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: "no evidence of a standard-library, repository, or external dependency"})
+				reason := "no evidence of a standard-library, repository, or external dependency"
+				if lookup.reason != "" {
+					reason = lookup.reason
+				} else if matchesScannedModule(imp, modules) {
+					reason = "matching scanned module has no proven local resolution"
+				}
+				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: imp, Reason: reason})
 			}
 		}
 	}
@@ -295,13 +330,169 @@ func containingModule(dir string, modules []module) (module, bool) {
 	return module{}, false
 }
 
-func internalModule(importPath string, modules []module) bool {
+func matchesScannedModule(importPath string, modules []module) bool {
 	for _, mod := range modules {
-		if importPath == mod.path || strings.HasPrefix(importPath, mod.path+"/") {
+		if hasImportPrefix(importPath, mod.path) {
 			return true
 		}
 	}
 	return false
+}
+
+func hasImportPrefix(importPath, modulePath string) bool {
+	return importPath == modulePath || strings.HasPrefix(importPath, modulePath+"/")
+}
+
+func resolveLocalPackage(root string, source module, importPath string, cache map[string]packageLookup, workspaces map[string]workspaceState) packageLookup {
+	key := source.dir + "\x00" + importPath
+	if lookup, ok := cache[key]; ok {
+		return lookup
+	}
+	workspace := workspaceForModule(root, source, workspaces)
+	if workspace.err != nil {
+		return packageLookup{reason: "Go workspace status unavailable: " + workspace.err.Error()}
+	}
+	if workspace.active && !workspace.sourceIncluded {
+		return packageLookup{reason: "source module is not included in active Go workspace"}
+	}
+	command := exec.Command("go", "list", "-e", "-json", "-mod=readonly", importPath)
+	command.Dir = filepath.Join(root, filepath.FromSlash(source.dir))
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
+	output, err := command.Output()
+	if err != nil {
+		reason := err.Error()
+		if exit, ok := err.(*exec.ExitError); ok && len(exit.Stderr) > 0 {
+			reason = strings.TrimSpace(string(exit.Stderr))
+		}
+		lookup := packageLookup{reason: "Go package metadata unavailable: " + reason, metadataUnavailable: true}
+		cache[key] = lookup
+		return lookup
+	}
+	var data struct {
+		ImportPath string
+		Dir        string
+		Name       string
+		GoFiles    []string
+		CgoFiles   []string
+		Error      *struct{ Err string }
+	}
+	if err := json.Unmarshal(output, &data); err != nil {
+		lookup := packageLookup{reason: "Go package metadata unavailable: " + err.Error()}
+		cache[key] = lookup
+		return lookup
+	}
+	if data.Error != nil || data.ImportPath != importPath || data.Dir == "" || data.Name == "" || len(data.GoFiles)+len(data.CgoFiles) == 0 {
+		reason := "Go did not resolve an analyzable local package"
+		if data.Error != nil && data.Error.Err != "" {
+			reason = "Go package resolution failed: " + data.Error.Err
+		}
+		lookup := packageLookup{reason: reason}
+		cache[key] = lookup
+		return lookup
+	}
+	localRoot, rootErr := filepath.EvalSymlinks(root)
+	resolved, dirErr := filepath.EvalSymlinks(data.Dir)
+	if rootErr != nil || dirErr != nil {
+		lookup := packageLookup{reason: "Go package directory could not be verified"}
+		cache[key] = lookup
+		return lookup
+	}
+	rel, err := filepath.Rel(localRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		lookup := packageLookup{reason: "Go resolved package outside scanned repository"}
+		cache[key] = lookup
+		return lookup
+	}
+	lookup := packageLookup{dir: filepath.ToSlash(rel), name: data.Name}
+	cache[key] = lookup
+	return lookup
+}
+
+func sameModulePackage(root string, source module, importPath string, modules []module, workspaces map[string]workspaceState) packageLookup {
+	// Unrelated missing go.sum entries can stop go list before it reports a same-module package.
+	if !hasImportPrefix(importPath, source.path) {
+		return packageLookup{}
+	}
+	workspace := workspaceForModule(root, source, workspaces)
+	if workspace.err != nil || workspace.active {
+		return packageLookup{}
+	}
+	if shadowedModuleImport(importPath, source) {
+		return packageLookup{}
+	}
+	rel := strings.TrimPrefix(importPath, source.path)
+	dir := path.Join(source.dir, strings.TrimPrefix(rel, "/"))
+	mod, ok := containingModule(dir, modules)
+	if !ok || mod.dir != source.dir {
+		return packageLookup{}
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(dir)))
+	if err != nil {
+		return packageLookup{}
+	}
+	localRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return packageLookup{}
+	}
+	physical, err := filepath.Rel(localRoot, resolved)
+	if err != nil || physical == ".." || strings.HasPrefix(physical, ".."+string(filepath.Separator)) {
+		return packageLookup{}
+	}
+	return packageLookup{dir: filepath.ToSlash(physical)}
+}
+
+func shadowedModuleImport(importPath string, source module) bool {
+	for required := range source.requires {
+		if len(required) > len(source.path) && hasImportPrefix(importPath, required) {
+			return true
+		}
+	}
+	for replaced := range source.replaced {
+		if len(replaced) > len(source.path) && hasImportPrefix(importPath, replaced) {
+			return true
+		}
+	}
+	return false
+}
+
+func lookupModule(root string, source module) string {
+	command := exec.Command("go", "list", "-m", "-json", source.path)
+	command.Dir = filepath.Join(root, filepath.FromSlash(source.dir))
+	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
+	output, err := command.Output()
+	if err != nil {
+		return ""
+	}
+	var data struct{ Dir string }
+	if json.Unmarshal(output, &data) != nil {
+		return ""
+	}
+	return data.Dir
+}
+
+func sameModuleDirectory(root, relativeDir, resolvedDir string) bool {
+	if resolvedDir == "" {
+		return false
+	}
+	local, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(relativeDir)))
+	if err != nil {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(resolvedDir)
+	return err == nil && local == resolved
+}
+
+func workspaceForModule(root string, mod module, cache map[string]workspaceState) workspaceState {
+	if state, ok := cache[mod.dir]; ok {
+		return state
+	}
+	active, err := activeWorkspace(filepath.Join(root, filepath.FromSlash(mod.dir)))
+	state := workspaceState{active: active, sourceIncluded: !active, err: err}
+	if active && err == nil {
+		state.sourceIncluded = sameModuleDirectory(root, mod.dir, lookupModule(root, mod))
+	}
+	cache[mod.dir] = state
+	return state
 }
 
 func externalDependency(importPath string, mod module) bool {

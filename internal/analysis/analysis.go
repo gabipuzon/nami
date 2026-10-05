@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"sort"
 
-	"nami/internal/analyzer/goanalyzer"
-	"nami/internal/detect"
-	"nami/internal/graph"
-	"nami/internal/scanner"
+	"github.com/gabipuzon/nami/internal/analyzer/goanalyzer"
+	"github.com/gabipuzon/nami/internal/detect"
+	"github.com/gabipuzon/nami/internal/graph"
+	"github.com/gabipuzon/nami/internal/scanner"
 )
 
 type Result struct {

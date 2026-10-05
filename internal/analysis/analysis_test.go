@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"nami/internal/graph"
+	"github.com/gabipuzon/nami/internal/graph"
 )
 
 func TestMapFixture(t *testing.T) {
@@ -103,6 +103,112 @@ func TestMapCompleteCoverage(t *testing.T) {
 	}
 	if result.Coverage != want || len(result.Issues) != 0 {
 		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+}
+
+func TestMultiModuleImportResolution(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		moduleExtra  string
+		workspace    string
+		localLibrary bool
+		external     int
+		unclassified int
+	}{
+		{name: "required module is external", external: 1},
+		{name: "local go.mod replace", moduleExtra: "replace example.com/library => ../library\n", localLibrary: true},
+		{name: "workspace use", workspace: "go 1.25.0\nuse (\n./app\n./library\n)\n", localLibrary: true},
+		{name: "replacement target unavailable", moduleExtra: "replace example.com/library => ../missing\n", unclassified: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, dir := range []string{"app/local", "library"} {
+				if err := os.MkdirAll(filepath.Join(root, dir), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			files := map[string]string{
+				"app/go.mod":         "module example.com/app\ngo 1.25.0\nrequire example.com/library v1.2.0\n" + test.moduleExtra,
+				"app/main.go":        "package main\nimport (\"example.com/app/local\"; \"example.com/library\")\n",
+				"app/local/local.go": "package local\n",
+				"library/go.mod":     "module example.com/library\ngo 1.25.0\n",
+				"library/library.go": "package library\n",
+			}
+			if test.workspace != "" {
+				files["go.work"] = test.workspace
+			}
+			for name, content := range files {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := Map(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			localEdge := graph.Edge{Kind: graph.Imports, From: "file:app/main.go", To: "package:app/local#local"}
+			libraryEdge := graph.Edge{Kind: graph.Imports, From: "file:app/main.go", To: "package:library#library"}
+			if !containsEdge(result.Graph.Edges, localEdge) || containsEdge(result.Graph.Edges, libraryEdge) != test.localLibrary {
+				t.Fatalf("import edges = %+v", result.Graph.Edges)
+			}
+			wantResolved := 1
+			if test.localLibrary {
+				wantResolved++
+			}
+			if result.Coverage.InternalResolved != wantResolved || result.Coverage.External != test.external || result.Coverage.Unclassified != test.unclassified {
+				t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+			}
+		})
+	}
+}
+
+func TestWorkspaceDoesNotConnectModuleOutsideUse(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"app", "library"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, content := range map[string]string{
+		"go.work":            "go 1.25.0\nuse ./library\n",
+		"app/go.mod":         "module example.com/app\ngo 1.25.0\nrequire example.com/library v1.2.0\n",
+		"app/main.go":        "package main\nimport \"example.com/library\"\n",
+		"library/go.mod":     "module example.com/library\ngo 1.25.0\n",
+		"library/library.go": "package library\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.InternalResolved != 0 || result.Coverage.Unclassified != 1 || len(result.Issues) != 1 || !strings.Contains(result.Issues[0].Reason, "source module is not included") {
+		t.Fatalf("coverage = %+v, issues = %+v", result.Coverage, result.Issues)
+	}
+}
+
+func TestRequiredNestedModuleDoesNotUseSamePathDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.mod":     "module example.com/app\nrequire example.com/app/sub v1.2.0\n",
+		"main.go":    "package main\nimport \"example.com/app/sub\"\n",
+		"sub/sub.go": "package sub\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.InternalResolved != 0 || result.Coverage.External != 1 || containsEdge(result.Graph.Edges, graph.Edge{Kind: graph.Imports, From: "file:main.go", To: "package:sub#sub"}) {
+		t.Fatalf("coverage = %+v, edges = %+v", result.Coverage, result.Graph.Edges)
 	}
 }
 

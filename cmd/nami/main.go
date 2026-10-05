@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"nami/internal/analysis"
+	"github.com/gabipuzon/nami/internal/analysis"
 )
 
 const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami [--help]\n"
