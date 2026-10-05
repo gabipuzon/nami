@@ -223,3 +223,54 @@ func TestPackagesCommandFoldsStoredFileImports(t *testing.T) {
 		t.Fatalf("projection changed stored edges: %+v, %v", loaded.Result.Graph.Edges, err)
 	}
 }
+
+func TestSymbolsReadsSavedDeclarations(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module example.com/symbols\ngo 1.25.0\n",
+		"main.go": "package main\nfunc Run() {}\nfunc init() {}\nfunc init() {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var mapped, stderr bytes.Buffer
+	if code := run([]string{"map", root}, &mapped, &stderr); code != 0 {
+		t.Fatalf("map = %d: %s", code, stderr.String())
+	}
+	firstLine, _, _ := strings.Cut(mapped.String(), "\n")
+	id := strings.Fields(strings.TrimPrefix(firstLine, "SAVED_SCAN id="))[0]
+	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
+		t.Fatal(err)
+	}
+	var symbols bytes.Buffer
+	if code := run([]string{"symbols", root, id, "file:main.go"}, &symbols, &stderr); code != 0 {
+		t.Fatalf("symbols = %d: %s", code, stderr.String())
+	}
+	want := "SYMBOL FUNCTION function:main.go#Run Run\nSYMBOL FUNCTION function:main.go#init@1 init\nSYMBOL FUNCTION function:main.go#init@2 init\n"
+	if symbols.String() != want {
+		t.Fatalf("symbols = %q, want %q", symbols.String(), want)
+	}
+	for _, test := range []struct{ node, want string }{
+		{"missing", `node "missing" not found`},
+		{"package:.#main", `is not a FILE`},
+	} {
+		var out, errOut bytes.Buffer
+		if code := run([]string{"symbols", root, id, test.node}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), test.want) {
+			t.Fatalf("symbols(%s) = %d, %q", test.node, code, errOut.String())
+		}
+	}
+	store, err := storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := store.Save(root, analysis.Result{Coverage: analysis.Coverage{Status: "complete"}, Graph: graph.Graph{Nodes: []graph.Node{{ID: "file:old.go", Kind: graph.File}}}})
+	store.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldSymbols, oldErr bytes.Buffer
+	if code := run([]string{"symbols", root, old.ID, "file:old.go"}, &oldSymbols, &oldErr); code != 0 || oldSymbols.Len() != 0 {
+		t.Fatalf("old snapshot symbols = %d, %q, %q", code, oldSymbols.String(), oldErr.String())
+	}
+}

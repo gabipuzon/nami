@@ -117,6 +117,9 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 		fileID := "file:" + rel
 		result.Fragment.Nodes = append(result.Fragment.Nodes, graph.Node{ID: fileID, Kind: graph.File, Path: rel, Name: path.Base(rel)})
 		result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Contains, From: packageID, To: fileID})
+		declarations := declarationFragment(file, rel)
+		result.Fragment.Nodes = append(result.Fragment.Nodes, declarations.Nodes...)
+		result.Fragment.Edges = append(result.Fragment.Edges, declarations.Edges...)
 
 		var imports []string
 		for _, imp := range file.Imports {

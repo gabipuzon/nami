@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/gabipuzon/nami/internal/analysis"
+	"github.com/gabipuzon/nami/internal/graph"
 	"github.com/gabipuzon/nami/internal/hierarchy"
 	"github.com/gabipuzon/nami/internal/query"
 	"github.com/gabipuzon/nami/internal/storage"
 )
 
-const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
+const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami symbols <directory> <scan-id> <file-node-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -109,6 +110,50 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		for _, edge := range projection.Graph.Edges {
 			fmt.Fprintf(stdout, "IMPORTS %s -> %s\n", edge.From, edge.To)
+		}
+		return 0
+	case "symbols":
+		if len(args) != 4 {
+			fmt.Fprintln(stderr, "usage: nami symbols <directory> <scan-id> <file-node-id>")
+			return 2
+		}
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scan, err := store.Load(args[2])
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		nodes := make(map[string]graph.Node)
+		for _, node := range scan.Result.Graph.Nodes {
+			nodes[node.ID] = node
+		}
+		file, ok := nodes[args[3]]
+		if !ok {
+			fmt.Fprintf(stderr, "node %q not found\n", args[3])
+			return 1
+		}
+		if file.Kind != graph.File {
+			fmt.Fprintf(stderr, "node %q is not a FILE\n", args[3])
+			return 1
+		}
+		h, err := hierarchy.New(scan.Result.Graph)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		children, err := h.Children(file.ID)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		for _, id := range children {
+			node := nodes[id]
+			fmt.Fprintf(stdout, "SYMBOL %s %s %s\n", node.Kind, node.ID, node.Name)
 		}
 		return 0
 	case "dependencies", "dependents", "path":

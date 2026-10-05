@@ -152,3 +152,32 @@ func TestOldGraphWithoutModulesCanStillFold(t *testing.T) {
 		t.Fatalf("old graph projection = %+v, %v", projection, err)
 	}
 }
+
+func TestDeclarationHierarchyAndProjection(t *testing.T) {
+	base := testGraph(t)
+	before, err := ProjectPackages(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []graph.NodeKind{graph.Function, graph.Method, graph.Struct, graph.Interface, graph.Type, graph.Variable, graph.Constant} {
+		id := string(kind)
+		base.Nodes = append(base.Nodes, graph.Node{ID: id, Kind: kind})
+		base.Edges = append(base.Edges, graph.Edge{Kind: graph.Contains, From: "a.go", To: id})
+	}
+	h, err := New(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	children, err := h.Children("a.go")
+	if err != nil || len(children) != 7 {
+		t.Fatalf("declaration children = %v, %v", children, err)
+	}
+	after, err := ProjectPackages(base)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("package projection changed: %+v, %v", after, err)
+	}
+	bad := graph.Graph{Nodes: []graph.Node{{ID: "A", Kind: graph.Package}, {ID: "F", Kind: graph.Function}}, Edges: []graph.Edge{{Kind: graph.Contains, From: "A", To: "F"}}}
+	if _, err := New(bad); err == nil || !strings.Contains(err.Error(), "invalid containment") {
+		t.Fatalf("invalid containment accepted: %v", err)
+	}
+}

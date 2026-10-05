@@ -24,7 +24,7 @@ func TestMapFixture(t *testing.T) {
 		t.Fatal("unchanged repository produced different results")
 	}
 
-	var modules, packages, files, contains, imports int
+	var modules, packages, files, declarations, contains, imports int
 	for _, node := range first.Graph.Nodes {
 		switch node.Kind {
 		case graph.Module:
@@ -33,6 +33,8 @@ func TestMapFixture(t *testing.T) {
 			packages++
 		case graph.File:
 			files++
+		case graph.Variable:
+			declarations++
 		}
 		if strings.Contains(node.ID, "ignored") {
 			t.Fatalf("build output entered graph: %s", node.ID)
@@ -46,8 +48,8 @@ func TestMapFixture(t *testing.T) {
 			imports++
 		}
 	}
-	if modules != 1 || packages != 4 || files != 5 || contains != 9 || imports != 5 {
-		t.Fatalf("modules=%d packages=%d files=%d contains=%d imports=%d", modules, packages, files, contains, imports)
+	if modules != 1 || packages != 4 || files != 5 || declarations != 4 || contains != 13 || imports != 5 {
+		t.Fatalf("modules=%d packages=%d files=%d declarations=%d contains=%d imports=%d", modules, packages, files, declarations, contains, imports)
 	}
 	wantEdges := []graph.Edge{
 		{Kind: graph.Contains, From: "module:.#example.com/fixture", To: "package:.#main"},
@@ -59,6 +61,10 @@ func TestMapFixture(t *testing.T) {
 		{Kind: graph.Contains, From: "package:alpha#alpha", To: "file:alpha/second.go"},
 		{Kind: graph.Contains, From: "package:beta#beta", To: "file:beta/b.go"},
 		{Kind: graph.Contains, From: "package:gamma#gamma", To: "file:gamma/g.go"},
+		{Kind: graph.Contains, From: "file:alpha/a.go", To: "variable:alpha/a.go#Name"},
+		{Kind: graph.Contains, From: "file:alpha/second.go", To: "variable:alpha/second.go#Other"},
+		{Kind: graph.Contains, From: "file:beta/b.go", To: "variable:beta/b.go#Name"},
+		{Kind: graph.Contains, From: "file:gamma/g.go", To: "variable:gamma/g.go#Name"},
 		{Kind: graph.Imports, From: "file:main.go", To: "package:alpha#alpha"},
 		{Kind: graph.Imports, From: "file:main.go", To: "package:gamma#gamma"},
 		{Kind: graph.Imports, From: "file:alpha/a.go", To: "package:beta#beta"},

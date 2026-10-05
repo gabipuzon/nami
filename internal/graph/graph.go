@@ -8,10 +8,26 @@ import (
 type NodeKind string
 
 const (
-	Module  NodeKind = "MODULE"
-	Package NodeKind = "PACKAGE"
-	File    NodeKind = "FILE"
+	Module    NodeKind = "MODULE"
+	Package   NodeKind = "PACKAGE"
+	File      NodeKind = "FILE"
+	Function  NodeKind = "FUNCTION"
+	Method    NodeKind = "METHOD"
+	Struct    NodeKind = "STRUCT"
+	Interface NodeKind = "INTERFACE"
+	Type      NodeKind = "TYPE"
+	Variable  NodeKind = "VARIABLE"
+	Constant  NodeKind = "CONSTANT"
 )
+
+func IsDeclaration(kind NodeKind) bool {
+	switch kind {
+	case Function, Method, Struct, Interface, Type, Variable, Constant:
+		return true
+	default:
+		return false
+	}
+}
 
 type EdgeKind string
 
