@@ -340,3 +340,16 @@ func TestImpactUsesStoredPackageProjectionAndCoverage(t *testing.T) {
 		}
 	}
 }
+
+func TestServeRequiresSavedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"serve", root, "missing"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `snapshot "missing" not found`) {
+		t.Fatalf("serve missing snapshot = %d, %q, %q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"serve", root}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "usage: nami serve") {
+		t.Fatalf("serve usage = %d, %q, %q", code, stdout.String(), stderr.String())
+	}
+}
