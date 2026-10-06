@@ -274,3 +274,69 @@ func TestSymbolsReadsSavedDeclarations(t *testing.T) {
 		t.Fatalf("old snapshot symbols = %d, %q, %q", code, oldSymbols.String(), oldErr.String())
 	}
 }
+
+func TestImpactUsesStoredPackageProjectionAndCoverage(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.go")
+	if err := os.WriteFile(source, []byte("package example\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []graph.Node{
+		{ID: "package:A", Kind: graph.Package}, {ID: "package:B", Kind: graph.Package},
+		{ID: "package:C", Kind: graph.Package}, {ID: "file:a.go", Kind: graph.File},
+		{ID: "file:c.go", Kind: graph.File}, {ID: "function:a.go#Run", Kind: graph.Function},
+	}
+	containment := []graph.Edge{
+		{Kind: graph.Contains, From: "package:A", To: "file:a.go"},
+		{Kind: graph.Contains, From: "package:C", To: "file:c.go"},
+		{Kind: graph.Contains, From: "file:a.go", To: "function:a.go#Run"},
+	}
+	store, err := storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.Save(root, analysis.Result{
+		Coverage: analysis.Coverage{Status: "completed_with_gaps"},
+		Graph: graph.Graph{Nodes: nodes, Edges: append(append([]graph.Edge(nil), containment...),
+			graph.Edge{Kind: graph.Imports, From: "file:a.go", To: "package:B"},
+			graph.Edge{Kind: graph.Imports, From: "file:c.go", To: "package:A"})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Save(root, analysis.Result{
+		Coverage: analysis.Coverage{Status: "complete"},
+		Graph: graph.Graph{Nodes: nodes, Edges: append(append([]graph.Edge(nil), containment...),
+			graph.Edge{Kind: graph.Imports, From: "file:c.go", To: "package:B"})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ scanID, target, want string }{
+		{first.ID, "package:B", "IMPACT_TARGET package:B\nAFFECTED distance=1 package:A\nAFFECTED distance=2 package:C\nIMPACT_COVERAGE status=completed_with_gaps\nIMPACT_WARNING stored scan has analysis gaps; impact may be incomplete\n"},
+		{second.ID, "package:B", "IMPACT_TARGET package:B\nAFFECTED distance=1 package:C\nIMPACT_COVERAGE status=complete\n"},
+		{first.ID, "package:C", "IMPACT_TARGET package:C\nAFFECTED none\nIMPACT_COVERAGE status=completed_with_gaps\nIMPACT_WARNING stored scan has analysis gaps; impact may be incomplete\n"},
+	} {
+		var out, errOut bytes.Buffer
+		if code := run([]string{"impact", root, test.scanID, test.target}, &out, &errOut); code != 0 || out.String() != test.want {
+			t.Fatalf("impact(%s, %s) = %d, %q, %q", test.scanID, test.target, code, out.String(), errOut.String())
+		}
+	}
+	for _, target := range []string{"file:a.go", "function:a.go#Run", "missing"} {
+		var out, errOut bytes.Buffer
+		if code := run([]string{"impact", root, first.ID, target}, &out, &errOut); code != 1 || out.Len() != 0 {
+			t.Fatalf("impact(%s) = %d, %q, %q", target, code, out.String(), errOut.String())
+		}
+		want := "is not a PACKAGE"
+		if target == "missing" {
+			want = `node "missing" not found`
+		}
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("impact(%s) error = %q", target, errOut.String())
+		}
+	}
+}

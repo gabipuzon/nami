@@ -9,11 +9,12 @@ import (
 	"github.com/gabipuzon/nami/internal/analysis"
 	"github.com/gabipuzon/nami/internal/graph"
 	"github.com/gabipuzon/nami/internal/hierarchy"
+	"github.com/gabipuzon/nami/internal/impact"
 	"github.com/gabipuzon/nami/internal/query"
 	"github.com/gabipuzon/nami/internal/storage"
 )
 
-const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami symbols <directory> <scan-id> <file-node-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
+const usage = "Nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami symbols <directory> <scan-id> <file-node-id>\n  nami impact <directory> <scan-id> <package-node-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami [--help]\n"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -154,6 +155,60 @@ func run(args []string, stdout, stderr io.Writer) int {
 		for _, id := range children {
 			node := nodes[id]
 			fmt.Fprintf(stdout, "SYMBOL %s %s %s\n", node.Kind, node.ID, node.Name)
+		}
+		return 0
+	case "impact":
+		if len(args) != 4 {
+			fmt.Fprintln(stderr, "usage: nami impact <directory> <scan-id> <package-node-id>")
+			return 2
+		}
+		store, err := storage.Open(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		scan, err := store.Load(args[2])
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		var target graph.Node
+		found := false
+		for _, node := range scan.Result.Graph.Nodes {
+			if node.ID == args[3] {
+				target, found = node, true
+				break
+			}
+		}
+		if !found {
+			fmt.Fprintf(stderr, "node %q not found\n", args[3])
+			return 1
+		}
+		if target.Kind != graph.Package {
+			fmt.Fprintf(stderr, "node %q is not a PACKAGE\n", args[3])
+			return 1
+		}
+		projection, err := hierarchy.ProjectPackages(scan.Result.Graph)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		result, err := impact.Analyze(projection.Graph, target.ID)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "IMPACT_TARGET %s\n", result.Target)
+		if len(result.Affected) == 0 {
+			fmt.Fprintln(stdout, "AFFECTED none")
+		}
+		for _, affected := range result.Affected {
+			fmt.Fprintf(stdout, "AFFECTED distance=%d %s\n", affected.Distance, affected.ID)
+		}
+		fmt.Fprintf(stdout, "IMPACT_COVERAGE status=%s\n", scan.Result.Coverage.Status)
+		if scan.Result.Coverage.Status != "complete" {
+			fmt.Fprintln(stdout, "IMPACT_WARNING stored scan has analysis gaps; impact may be incomplete")
 		}
 		return 0
 	case "dependencies", "dependents", "path":
