@@ -1,19 +1,42 @@
 # Nami
 
-Nami is a local-first codebase navigator. It currently maps Go packages, Go
-source files, and internal imports from a local repository.
+Nami is a local-first codebase navigator. It maps Go modules, packages, source
+files, package-scope declarations, and proven internal imports from a local
+repository.
 
 ```sh
 go run ./cmd/nami map .
 ```
 
-The output lists package and file nodes, then `CONTAINS` and internal `IMPORTS`
+The output lists graph nodes, then `CONTAINS` and internal `IMPORTS`
 edges. Imports whose internal targets cannot be established are listed as
 `UNRESOLVED_IMPORT`. Invalid Go files and module metadata are reported too.
 Other source languages are reported as unsupported. Standard-library and
-external imports do not become graph nodes. This phase does not analyze symbols
-or non-Go source. Nami uses the local `go` command to read module paths; mapping
+external imports do not become graph nodes. Nami does not analyze non-Go source.
+It uses the local `go` command to read module paths; mapping
 does not need a network connection.
+
+## Web map
+
+Requires Node.js 20.9 or newer. First save a scan and use the ID printed by
+`map`:
+
+```sh
+go run ./cmd/nami map .
+go run ./cmd/nami serve . <scan-id>
+```
+
+In another terminal:
+
+```sh
+cd web
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The browser uses the local API through a Next.js
+rewrite. The server keeps showing the selected saved scan until restarted with
+another ID.
 
 ## Coverage
 
@@ -45,5 +68,5 @@ make build
 ./bin/nami --help
 ```
 
-`make check` verifies Go formatting, runs tests, and runs `go vet`. CI runs
-`make check build` on pushes and pull requests.
+`make check` verifies Go formatting, runs tests, and runs `go vet`. CI also runs
+the web tests, lint, and build on pushes and pull requests.
