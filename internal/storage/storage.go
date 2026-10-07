@@ -19,7 +19,8 @@ import (
 const schemaVersion = 2
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	version int
 }
 
 type Snapshot struct {
@@ -59,7 +60,7 @@ func Open(root string) (*Store, error) {
 		return nil, fmt.Errorf("open repository store: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, version: schemaVersion}
 	if err := store.initialize(); err != nil {
 		db.Close()
 		return nil, err
@@ -68,6 +69,38 @@ func Open(root string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// OpenReadOnly loads existing stores without creating directories, initializing
+// tables, or migrating SQLite. Interfaces that promise no writes use this path.
+func OpenReadOnly(root string) (*Store, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repository path: %w", err)
+	}
+	info, err := os.Stat(absRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open repository store: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("open repository store: %q is not a directory", absRoot)
+	}
+	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(absRoot, ".nami", "scans.db")), RawQuery: "mode=ro&_foreign_keys=1"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open read-only repository store: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("read store schema version: %w", err)
+	}
+	if version < 1 || version > schemaVersion {
+		db.Close()
+		return nil, fmt.Errorf("read-only store schema version %d is unsupported", version)
+	}
+	return &Store{db: db, version: version}, nil
+}
 
 func (s *Store) initialize() error {
 	var version int
@@ -244,7 +277,13 @@ func (s *Store) Load(id string) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("parse snapshot creation time: %w", err)
 	}
 	c.Status = snap.Status
-	nodes, err := s.db.Query(`SELECT id, kind, path, name, import_count, export_count FROM nodes WHERE scan_id = ? ORDER BY kind, id`, id)
+	counts := "import_count, export_count"
+	if s.version == 1 {
+		// Legacy snapshots lack source counts. Read them without migrating the
+		// database or implying that missing counts are zero.
+		counts = "NULL, NULL"
+	}
+	nodes, err := s.db.Query(`SELECT id, kind, path, name, `+counts+` FROM nodes WHERE scan_id = ? ORDER BY kind, id`, id)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load graph nodes: %w", err)
 	}

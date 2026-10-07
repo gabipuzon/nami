@@ -38,6 +38,31 @@ Open `http://localhost:3000`. The browser uses the local API through a Next.js
 rewrite. The server keeps showing the selected saved scan until restarted with
 another ID.
 
+## MCP
+
+Coding agents can query a saved scan through a local stdio MCP server:
+
+```sh
+./bin/nami mcp /absolute/path/to/repository <scan-id>
+```
+
+Configure your MCP client with the absolute path to the built `nami` binary as
+its command and `["mcp", "/absolute/path/to/repository", "<scan-id>"]` as its
+arguments. The client launches the process and communicates over stdin/stdout;
+diagnostics go to stderr.
+
+The server exposes `nami_scan_info`, `nami_search_nodes`, `nami_inspect_node`,
+`nami_package_dependencies`, `nami_package_dependents`, `nami_dependency_path`,
+`nami_file_symbols`, and `nami_package_impact`. Search first, then inspect or
+query the relevant node IDs. Package relationships include their saved import
+evidence; paths follow only known `IMPORTS` edges in canonical or package scope.
+
+MCP loads one saved snapshot and closes SQLite before handling requests. It
+does not rescan, read current source, edit files, or change the database. Restart
+it with another scan ID to query a newer snapshot. Check `nami_scan_info` for
+analysis gaps; impact reports potential dependency reachability and preserves
+the snapshot's incomplete status.
+
 ## Coverage
 
 `COVERAGE status=complete` means nami found no analysis gaps. A successful map
