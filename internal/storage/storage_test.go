@@ -54,6 +54,11 @@ func TestSnapshotRoundTripAndImmutability(t *testing.T) {
 	if !reflect.DeepEqual(loaded.Result, first) || loaded.Root != root || loaded.Status != first.Coverage.Status || loaded.CreatedAt.IsZero() {
 		t.Fatalf("round trip changed snapshot: %+v", loaded)
 	}
+	for _, node := range loaded.Result.Graph.Nodes {
+		if node.Kind == graph.File && (node.ImportCount != 2 || node.ExportCount != 0 || !node.HasSourceCounts) {
+			t.Fatalf("source counts did not round trip: %+v", node)
+		}
+	}
 	foundContainment := false
 	for _, edge := range loaded.Result.Graph.Edges {
 		if edge.Kind == graph.Contains && edge.From == moduleID && edge.To == "package:.#main" {
@@ -128,13 +133,99 @@ func TestUnsupportedSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec("PRAGMA user_version = 2"); err != nil {
+	if _, err := store.db.Exec("PRAGMA user_version = 3"); err != nil {
 		t.Fatal(err)
 	}
 	store.Close()
 	if _, err := Open(root); err == nil || !strings.Contains(err.Error(), "unsupported store schema version") {
 		t.Fatalf("schema mismatch = %v", err)
 	}
+}
+
+func TestVersionOneStoreMigrationPreservesUnknownCounts(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Save(root, analysis.Result{
+		Coverage: analysis.Coverage{Status: "complete"},
+		Graph:    graph.Graph{Nodes: []graph.Node{{ID: "file:old.go", Kind: graph.File, Path: "old.go", Name: "old.go"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE nodes DROP COLUMN import_count`,
+		`ALTER TABLE nodes DROP COLUMN export_count`,
+		`PRAGMA user_version = 1`,
+	} {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	loaded, err := store.Load(summary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Result.Graph.Nodes) != 1 || loaded.Result.Graph.Nodes[0].HasSourceCounts {
+		t.Fatalf("old counts should be unavailable: %+v", loaded.Result.Graph.Nodes)
+	}
+}
+
+func TestExportUseEvidenceRoundTrips(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "provider"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.mod":             "module example.com/evidence\ngo 1.25.0\n",
+		"provider/first.go":  "package provider\nvar First = 1\n",
+		"provider/second.go": "package provider\nvar Second = 2\n",
+		"main.go":            "package main\nimport \"example.com/evidence/provider\"\nvar Value = provider.Second\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := analysis.Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := graph.Edge{Kind: graph.UsesExport, From: "file:main.go", To: "file:provider/second.go"}
+	if !hasGraphEdge(result.Graph.Edges, want) || hasGraphEdge(result.Graph.Edges, graph.Edge{Kind: graph.UsesExport, From: "file:main.go", To: "file:provider/first.go"}) {
+		t.Fatalf("export-use evidence = %+v", result.Graph.Edges)
+	}
+	store, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	summary, err := store.Save(root, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(summary.ID)
+	if err != nil || !reflect.DeepEqual(loaded.Result, result) {
+		t.Fatalf("export-use evidence changed after load: %+v, %v", loaded.Result, err)
+	}
+}
+
+func hasGraphEdge(edges []graph.Edge, want graph.Edge) bool {
+	for _, edge := range edges {
+		if edge == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEdgeCannotReferenceAnotherScanNode(t *testing.T) {

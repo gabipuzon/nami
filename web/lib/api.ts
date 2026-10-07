@@ -6,16 +6,16 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
     response = await fetch(path, { signal });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new Error("Unable to connect to the local Nami API.");
+    throw new Error("Unable to connect to the local nami API.");
   }
   if (!response.ok) {
-    let message = `Nami API returned ${response.status}.`;
+    let message = `nami API returned ${response.status}.`;
     try {
       const body: ApiError = await response.json();
       if (body.error?.message) message = body.error.message;
     } catch {
       // The local proxy may return non-JSON when its backend is offline.
-      if (response.status >= 500) message = "Unable to connect to the local Nami API.";
+      if (response.status >= 500) message = "Unable to connect to the local nami API.";
     }
     throw new Error(message);
   }

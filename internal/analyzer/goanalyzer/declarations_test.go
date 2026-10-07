@@ -31,8 +31,11 @@ func init() {}
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := declarationFragment(file, "example.go")
-	second := declarationFragment(file, "example.go")
+	first, exports := declarationFragment(file, "example.go")
+	if exports != 11 {
+		t.Fatalf("exported declarations = %d, want 11", exports)
+	}
+	second, _ := declarationFragment(file, "example.go")
 	if !reflect.DeepEqual(first, second) {
 		t.Fatal("declarations changed between runs")
 	}
@@ -71,8 +74,8 @@ func TestFileScopedDeclarationIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	linux := declarationFragment(file, "thing_linux.go")
-	windows := declarationFragment(file, "thing_windows.go")
+	linux, _ := declarationFragment(file, "thing_linux.go")
+	windows, _ := declarationFragment(file, "thing_windows.go")
 	if linux.Nodes[0].ID == windows.Nodes[0].ID {
 		t.Fatal("declarations from different files collided")
 	}

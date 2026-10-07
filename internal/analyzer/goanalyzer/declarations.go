@@ -4,13 +4,15 @@ import (
 	"go/ast"
 	"go/token"
 	"strconv"
+	"strings"
 
 	"github.com/gabipuzon/nami/internal/graph"
 )
 
 // declarationFragment records only declarations directly owned by the parsed file.
-func declarationFragment(file *ast.File, rel string) graph.Fragment {
+func declarationFragment(file *ast.File, rel string) (graph.Fragment, int) {
 	fragment := graph.Fragment{}
+	exportCount := 0
 	initCount := 0
 	fileID := "file:" + rel
 	add := func(kind graph.NodeKind, prefix, identity, name string) {
@@ -20,6 +22,10 @@ func declarationFragment(file *ast.File, rel string) graph.Fragment {
 		id := prefix + ":" + rel + "#" + identity
 		fragment.Nodes = append(fragment.Nodes, graph.Node{ID: id, Kind: kind, Path: rel, Name: name})
 		fragment.Edges = append(fragment.Edges, graph.Edge{Kind: graph.Contains, From: fileID, To: id})
+		// Each emitted exported identifier is one source declaration in this view.
+		if ast.IsExported(name) || (kind == graph.Method && ast.IsExported(name[strings.LastIndex(name, ".")+1:])) {
+			exportCount++
+		}
 	}
 	for _, declaration := range file.Decls {
 		switch decl := declaration.(type) {
@@ -68,7 +74,7 @@ func declarationFragment(file *ast.File, rel string) graph.Fragment {
 			}
 		}
 	}
-	return fragment
+	return fragment, exportCount
 }
 
 func receiverName(expr ast.Expr) string {

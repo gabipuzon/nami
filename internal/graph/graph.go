@@ -32,15 +32,19 @@ func IsDeclaration(kind NodeKind) bool {
 type EdgeKind string
 
 const (
-	Contains EdgeKind = "CONTAINS"
-	Imports  EdgeKind = "IMPORTS"
+	Contains   EdgeKind = "CONTAINS"
+	Imports    EdgeKind = "IMPORTS"
+	UsesExport EdgeKind = "USES_EXPORT"
 )
 
 type Node struct {
-	ID   string
-	Kind NodeKind
-	Path string
-	Name string
+	ID              string
+	Kind            NodeKind
+	Path            string
+	Name            string
+	ImportCount     int
+	ExportCount     int
+	HasSourceCounts bool
 }
 
 type Edge struct {

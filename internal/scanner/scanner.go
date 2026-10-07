@@ -9,7 +9,7 @@ import (
 )
 
 var ignoredDirectories = map[string]bool{
-	".git": true, ".hg": true, ".svn": true, ".nami": true,
+	".git": true, ".hg": true, ".svn": true, ".nami": true, ".next": true,
 	"bin": true, "build": true, "dist": true, "node_modules": true, "vendor": true,
 }
 

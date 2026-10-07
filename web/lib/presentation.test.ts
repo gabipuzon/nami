@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildVisibleGraph, revealNode, type PresentationInput } from "./presentation.ts";
+import { buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, revealNode, type PresentationInput } from "./presentation.ts";
 import { declarationKinds, type Graph, type PackageProjection } from "./types.ts";
 
 const canonicalGraph: Graph = {
@@ -20,6 +20,7 @@ const canonicalGraph: Graph = {
     { kind: "CONTAINS", from: "file:a.go", to: "function:a.go#Run" },
     { kind: "CONTAINS", from: "file:a.go", to: "method:a.go#Service.Save" },
     { kind: "IMPORTS", from: "file:a.go", to: "package:B" },
+    { kind: "USES_EXPORT", from: "file:a.go", to: "file:b.go" },
   ],
 };
 
@@ -49,6 +50,20 @@ test("collapsed graph uses only backend package projection", () => {
   assert.deepEqual(graph.edges[0].evidence, packageProjection.evidence[0].sources);
 });
 
+test("only known imports and export uses mark file rows as connected", () => {
+  const roles = fileDependencyRoles(canonicalGraph);
+  assert.deepEqual([...roles.importing], ["file:a.go"]);
+  assert.deepEqual([...roles.supplying], ["file:b.go"]);
+  assert.ok(!roles.importing.has("file:quiet.go") && !roles.supplying.has("file:quiet.go"));
+});
+
+test("focus keeps only direct package neighbors", () => {
+  const graph = buildVisibleGraph(input());
+  assert.deepEqual([...directlyConnectedPackages(graph, "package:A")].sort(), ["package:A", "package:B"]);
+  const isolated = { ...graph, nodes: [...graph.nodes, { id: "package:C", kind: "PACKAGE" as const, name: "other", path: "other", childCount: 0, expanded: false }] };
+  assert.ok(!directlyConnectedPackages(isolated, "package:A").has("package:C"));
+});
+
 test("expansion shows canonical file and declaration children", () => {
   const state = input();
   state.expandedPackages = new Set(["package:A"]);
@@ -69,6 +84,46 @@ test("expanded target remains a package import target", () => {
   const imports = graph.edges.filter((edge) => edge.kind === "IMPORTS");
   assert.deepEqual(imports.map((edge) => [edge.source, edge.target]), [["file:a.go", "package:B"]]);
   assert.ok(graph.nodes.some((node) => node.id === "file:b.go"));
+});
+
+test("visual import lines enter the importing file without changing saved evidence", () => {
+  const state = input();
+  state.expandedPackages = new Set(["package:A"]);
+  const expanded = buildVisibleGraph(state);
+  const nodes = new Map(expanded.nodes.map((node) => [node.id, node]));
+  const edge = expanded.edges.find((item) => item.kind === "IMPORTS");
+  assert.ok(edge);
+  assert.deepEqual(importCardLines(edge, nodes, buildExportUseIndex(canonicalGraph)), [{
+    id: edge.id, canonicalEdgeID: edge.id, source: "package:B", target: "package:A", targetHandle: "file:a.go", importingFileID: "file:a.go",
+  }]);
+  assert.deepEqual(edge.evidence, [{ kind: "IMPORTS", from: "file:a.go", to: "package:B" }]);
+  const collapsed = buildVisibleGraph(input());
+  assert.deepEqual(importCardLines(collapsed.edges[0], new Map(collapsed.nodes.map((node) => [node.id, node])), buildExportUseIndex(canonicalGraph)), [{
+    id: collapsed.edges[0].id, canonicalEdgeID: collapsed.edges[0].id, source: "package:B", target: "package:A", targetHandle: undefined, importingFileID: "file:a.go",
+  }]);
+});
+
+test("saved export-use evidence anchors a dependency line to its supplying file", () => {
+  const state = input();
+  state.expandedPackages = new Set(["package:A", "package:B"]);
+  const expanded = buildVisibleGraph(state);
+  const nodes = new Map(expanded.nodes.map((node) => [node.id, node]));
+  const edge = expanded.edges.find((item) => item.kind === "IMPORTS");
+  assert.ok(edge);
+  assert.deepEqual(importCardLines(edge, nodes, buildExportUseIndex(canonicalGraph)), [{
+    id: `${edge.id}|file:a.go|file:b.go`, canonicalEdgeID: edge.id, source: "package:B", sourceHandle: "file:b.go", target: "package:A", targetHandle: "file:a.go", importingFileID: "file:a.go", supplyingFileID: "file:b.go",
+  }]);
+  const extraFile = { id: "file:extra.go", kind: "FILE" as const, name: "extra.go", path: "store/extra.go", parentId: "package:B", childCount: 0, expanded: false };
+  nodes.set(extraFile.id, extraFile);
+  assert.equal(importCardLines(edge, nodes, buildExportUseIndex(canonicalGraph))[0].sourceHandle, "file:b.go");
+  const twoProviders: Graph = { ...canonicalGraph, nodes: [...canonicalGraph.nodes, extraFile], edges: [
+    ...canonicalGraph.edges,
+    { kind: "CONTAINS", from: "package:B", to: extraFile.id },
+    { kind: "USES_EXPORT", from: "file:a.go", to: extraFile.id },
+  ] };
+  assert.deepEqual(importCardLines(edge, nodes, buildExportUseIndex(twoProviders)).map((line) => line.sourceHandle), ["file:b.go", "file:extra.go"]);
+  const oldGraph = { ...canonicalGraph, edges: canonicalGraph.edges.filter((item) => item.kind !== "USES_EXPORT") };
+  assert.equal(importCardLines(edge, nodes, buildExportUseIndex(oldGraph))[0].sourceHandle, undefined);
 });
 
 test("declaration filters affect visibility only", () => {

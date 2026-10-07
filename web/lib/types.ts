@@ -4,13 +4,15 @@ export const declarationKinds = [
 
 export type DeclarationKind = typeof declarationKinds[number];
 export type NodeKind = "MODULE" | "PACKAGE" | "FILE" | DeclarationKind;
-export type EdgeKind = "CONTAINS" | "IMPORTS";
+export type EdgeKind = "CONTAINS" | "IMPORTS" | "USES_EXPORT";
 
 export interface GraphNode {
   id: string;
   kind: NodeKind;
   path: string;
   name: string;
+  import_count?: number;
+  export_count?: number;
 }
 
 export interface GraphEdge {

@@ -15,10 +15,12 @@ import (
 )
 
 type nodeJSON struct {
-	ID   string         `json:"id"`
-	Kind graph.NodeKind `json:"kind"`
-	Path string         `json:"path"`
-	Name string         `json:"name"`
+	ID          string         `json:"id"`
+	Kind        graph.NodeKind `json:"kind"`
+	Path        string         `json:"path"`
+	Name        string         `json:"name"`
+	ImportCount *int           `json:"import_count,omitempty"`
+	ExportCount *int           `json:"export_count,omitempty"`
 }
 
 type edgeJSON struct {
@@ -282,7 +284,12 @@ func (h *handler) requireNode(w http.ResponseWriter, id string, kind graph.NodeK
 }
 
 func convertNode(node graph.Node) nodeJSON {
-	return nodeJSON{ID: node.ID, Kind: node.Kind, Path: node.Path, Name: node.Name}
+	result := nodeJSON{ID: node.ID, Kind: node.Kind, Path: node.Path, Name: node.Name}
+	if node.Kind == graph.File && node.HasSourceCounts {
+		result.ImportCount = &node.ImportCount
+		result.ExportCount = &node.ExportCount
+	}
+	return result
 }
 
 func convertEdge(edge graph.Edge) edgeJSON {

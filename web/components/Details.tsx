@@ -6,6 +6,8 @@ import { isDeclarationKind, type VisibleEdge } from "../lib/presentation";
 interface DetailsProps {
   selectedNode: GraphNode | null;
   selectedEdge: VisibleEdge | null;
+  selectedSupplierID: string | null;
+  selectedImporterID: string | null;
   canonicalGraph: Graph;
   packageProjection: PackageProjection;
   impact: Impact | null;
@@ -38,7 +40,7 @@ function EvidenceList({ sources, nodes }: { sources: GraphEdge[]; nodes: Readonl
 }
 
 export function Details(props: DetailsProps) {
-  const { selectedNode, selectedEdge, canonicalGraph, packageProjection, impact, impactLoading, impactError, onShowImpact, onSelectNode } = props;
+  const { selectedNode, selectedEdge, selectedSupplierID, selectedImporterID, canonicalGraph, packageProjection, impact, impactLoading, impactError, onShowImpact, onSelectNode } = props;
   const nodes = new Map(canonicalGraph.nodes.map((node) => [node.id, node]));
   const parent = new Map(canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
   const directChildren = (id: string) => canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS" && edge.from === id).map((edge) => edge.to).sort();
@@ -49,7 +51,7 @@ export function Details(props: DetailsProps) {
 
   if (selectedEdge) {
     return <aside className="details-panel" aria-label="Details">
-      <div className="panel-heading"><h2>Details</h2><span>Relationship</span></div>
+      <div className="panel-heading"><h2>Inspector</h2><span>Relationship</span></div>
       <div className="details-scroll">
         <div className="detail-intro"><span className="kind-label">{selectedEdge.kind.toLowerCase()}</span><h3>{nameFor(selectedEdge.source, nodes)} <span aria-hidden="true">→</span> {nameFor(selectedEdge.target, nodes)}</h3></div>
         <div className="fact-grid"><span>Source</span><code>{selectedEdge.source}</code><span>Target</span><code>{selectedEdge.target}</code></div>
@@ -57,13 +59,17 @@ export function Details(props: DetailsProps) {
           <h3>Supporting imports <span>{selectedEdge.evidence.length}</span></h3>
           <EvidenceList sources={selectedEdge.evidence} nodes={nodes} />
         </section>}
+        {selectedSupplierID && selectedImporterID && canonicalGraph.edges.some((edge) => edge.kind === "USES_EXPORT" && edge.from === selectedImporterID && edge.to === selectedSupplierID) && <section className="detail-section">
+          <h3>Source-backed file connection</h3>
+          <div className="fact-grid"><span>Imports in</span><code>{nodes.get(selectedImporterID)?.path}</code><span>Export used from</span><code>{nodes.get(selectedSupplierID)?.path}</code></div>
+        </section>}
       </div>
     </aside>;
   }
 
   if (!selectedNode) {
     return <aside className="details-panel" aria-label="Details">
-      <div className="panel-heading"><h2>Details</h2></div>
+      <div className="panel-heading"><h2>Inspector</h2></div>
       <div className="empty-details"><span className="empty-details-glyph" aria-hidden="true">⌖</span><p>Select a node or dependency to inspect its saved graph facts.</p></div>
     </aside>;
   }
@@ -72,14 +78,15 @@ export function Details(props: DetailsProps) {
   const isFile = selectedNode.kind === "FILE";
   const outgoing = isPackage ? packageOutgoing(selectedNode.id) : canonicalOutgoing(selectedNode.id);
   const incoming = isPackage ? packageIncoming(selectedNode.id) : canonicalIncoming(selectedNode.id);
+  const files = isPackage ? directChildren(selectedNode.id).filter((id) => nodes.get(id)?.kind === "FILE") : [];
   return <aside className="details-panel" aria-label="Details">
-    <div className="panel-heading"><h2>Details</h2><span>{selectedNode.kind.toLowerCase()}</span></div>
+    <div className="panel-heading"><h2>Inspector</h2><span>{selectedNode.kind.toLowerCase()}</span></div>
     <div className="details-scroll">
-      <div className="detail-intro"><span className="kind-label">{selectedNode.kind.toLowerCase()}</span><h3>{selectedNode.name}</h3></div>
-      <div className="fact-grid"><span>Path</span><code>{selectedNode.path}</code><span>Node ID</span><code>{selectedNode.id}</code></div>
+      <div className="detail-intro"><h3>{selectedNode.name}</h3><span className="kind-label">{selectedNode.kind.toLowerCase()}</span><code className="detail-path">{selectedNode.path}</code></div>
+      {isPackage && <div className="detail-summary"><span>{files.length} files</span><span>{outgoing.length} dependencies</span><span>{incoming.length} dependents</span></div>}
 
       {isPackage && <>
-        <FactList title="Files" ids={directChildren(selectedNode.id).filter((id) => nodes.get(id)?.kind === "FILE")} nodes={nodes} onSelectNode={onSelectNode} />
+        <FactList title="Files" ids={files} nodes={nodes} onSelectNode={onSelectNode} />
         <FactList title="Depends on" ids={outgoing} nodes={nodes} onSelectNode={onSelectNode} />
         <FactList title="Depended on by" ids={incoming} nodes={nodes} onSelectNode={onSelectNode} />
         {packageProjection.evidence.filter((item) => item.edge.from === selectedNode.id).map((item) =>
@@ -109,6 +116,7 @@ export function Details(props: DetailsProps) {
       </>}
 
       {isDeclarationKind(selectedNode.kind) && <FactList title="Containing file" ids={parent.has(selectedNode.id) ? [parent.get(selectedNode.id)!] : []} nodes={nodes} onSelectNode={onSelectNode} />}
+      <div className="detail-id"><span>Node ID</span><code>{selectedNode.id}</code></div>
     </div>
   </aside>;
 }

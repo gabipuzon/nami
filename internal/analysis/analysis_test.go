@@ -70,6 +70,11 @@ func TestMapFixture(t *testing.T) {
 		{Kind: graph.Imports, From: "file:alpha/a.go", To: "package:beta#beta"},
 		{Kind: graph.Imports, From: "file:alpha/second.go", To: "package:beta#beta"},
 		{Kind: graph.Imports, From: "file:beta/b.go", To: "package:gamma#gamma"},
+		{Kind: graph.UsesExport, From: "file:main.go", To: "file:alpha/a.go"},
+		{Kind: graph.UsesExport, From: "file:main.go", To: "file:gamma/g.go"},
+		{Kind: graph.UsesExport, From: "file:alpha/a.go", To: "file:beta/b.go"},
+		{Kind: graph.UsesExport, From: "file:alpha/second.go", To: "file:beta/b.go"},
+		{Kind: graph.UsesExport, From: "file:beta/b.go", To: "file:gamma/g.go"},
 	}
 	for _, want := range wantEdges {
 		if !containsEdge(first.Graph.Edges, want) {

@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 type Store struct {
 	db *sql.DB
@@ -74,7 +74,7 @@ func (s *Store) initialize() error {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read store schema version: %w", err)
 	}
-	if version != 0 && version != schemaVersion {
+	if version < 0 || version > schemaVersion {
 		return fmt.Errorf("unsupported store schema version %d (expected %d)", version, schemaVersion)
 	}
 	var foreignKeys int
@@ -82,6 +82,26 @@ func (s *Store) initialize() error {
 		return fmt.Errorf("store foreign keys unavailable: %v", err)
 	}
 	if version == schemaVersion {
+		return nil
+	}
+	if version == 1 {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return fmt.Errorf("migrate store: %w", err)
+		}
+		defer tx.Rollback()
+		for _, statement := range []string{
+			`ALTER TABLE nodes ADD COLUMN import_count INTEGER`,
+			`ALTER TABLE nodes ADD COLUMN export_count INTEGER`,
+			`PRAGMA user_version = 2`,
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return fmt.Errorf("migrate store schema: %w", err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit store migration: %w", err)
+		}
 		return nil
 	}
 	tx, err := s.db.Begin()
@@ -100,6 +120,7 @@ func (s *Store) initialize() error {
 		)`,
 		`CREATE TABLE nodes (
 			scan_id TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL,
+			import_count INTEGER, export_count INTEGER,
 			PRIMARY KEY (scan_id, id), FOREIGN KEY (scan_id) REFERENCES snapshots(id)
 		)`,
 		`CREATE TABLE edges (
@@ -113,7 +134,7 @@ func (s *Store) initialize() error {
 			path TEXT NOT NULL, import_path TEXT NOT NULL, reason TEXT NOT NULL,
 			PRIMARY KEY (scan_id, ordinal), FOREIGN KEY (scan_id) REFERENCES snapshots(id)
 		)`,
-		`PRAGMA user_version = 1`,
+		`PRAGMA user_version = 2`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize store schema: %w", err)
@@ -152,7 +173,11 @@ func (s *Store) Save(root string, result analysis.Result) (Summary, error) {
 		return Summary{}, fmt.Errorf("save snapshot metadata: %w", err)
 	}
 	for _, node := range result.Graph.Nodes {
-		if _, err := tx.Exec(`INSERT INTO nodes VALUES (?,?,?,?,?)`, summary.ID, node.ID, node.Kind, node.Path, node.Name); err != nil {
+		var imports, exports any
+		if node.Kind == graph.File && node.HasSourceCounts {
+			imports, exports = node.ImportCount, node.ExportCount
+		}
+		if _, err := tx.Exec(`INSERT INTO nodes VALUES (?,?,?,?,?,?,?)`, summary.ID, node.ID, node.Kind, node.Path, node.Name, imports, exports); err != nil {
 			return Summary{}, fmt.Errorf("save graph node %q: %w", node.ID, err)
 		}
 	}
@@ -219,15 +244,19 @@ func (s *Store) Load(id string) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("parse snapshot creation time: %w", err)
 	}
 	c.Status = snap.Status
-	nodes, err := s.db.Query(`SELECT id, kind, path, name FROM nodes WHERE scan_id = ? ORDER BY kind, id`, id)
+	nodes, err := s.db.Query(`SELECT id, kind, path, name, import_count, export_count FROM nodes WHERE scan_id = ? ORDER BY kind, id`, id)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load graph nodes: %w", err)
 	}
 	for nodes.Next() {
 		var node graph.Node
-		if err := nodes.Scan(&node.ID, &node.Kind, &node.Path, &node.Name); err != nil {
+		var imports, exports sql.NullInt64
+		if err := nodes.Scan(&node.ID, &node.Kind, &node.Path, &node.Name, &imports, &exports); err != nil {
 			nodes.Close()
 			return Snapshot{}, fmt.Errorf("read graph node: %w", err)
+		}
+		if imports.Valid && exports.Valid {
+			node.ImportCount, node.ExportCount, node.HasSourceCounts = int(imports.Int64), int(exports.Int64), true
 		}
 		snap.Result.Graph.Nodes = append(snap.Result.Graph.Nodes, node)
 	}

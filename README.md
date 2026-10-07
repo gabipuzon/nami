@@ -1,6 +1,6 @@
-# Nami
+# nami
 
-Nami is a local-first codebase navigator. It maps Go modules, packages, source
+nami is a local-first codebase navigator. It maps Go modules, packages, source
 files, package-scope declarations, and proven internal imports from a local
 repository.
 
@@ -12,7 +12,7 @@ The output lists graph nodes, then `CONTAINS` and internal `IMPORTS`
 edges. Imports whose internal targets cannot be established are listed as
 `UNRESOLVED_IMPORT`. Invalid Go files and module metadata are reported too.
 Other source languages are reported as unsupported. Standard-library and
-external imports do not become graph nodes. Nami does not analyze non-Go source.
+external imports do not become graph nodes. nami does not analyze non-Go source.
 It uses the local `go` command to read module paths; mapping
 does not need a network connection.
 
@@ -40,7 +40,7 @@ another ID.
 
 ## Coverage
 
-`COVERAGE status=complete` means Nami found no analysis gaps. A successful map
+`COVERAGE status=complete` means nami found no analysis gaps. A successful map
 with skipped or failed files, unresolved imports, or module errors reports
 `completed_with_gaps` and lists each reason.
 

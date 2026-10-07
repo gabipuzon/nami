@@ -57,18 +57,20 @@ export function Explorer(props: ExplorerProps) {
           </button>
         )}
       </div>}
-      <div className="section-heading">Visible levels</div>
-      <div className="count-row"><span>Packages</span><strong>{counts.packages}</strong></div>
-      <div className="count-row"><span>Files</span><strong>{counts.files}</strong></div>
-      <div className="count-row"><span>Declarations</span><strong>{counts.declarations}</strong></div>
-
-      <div className="section-heading filter-heading">Declaration kinds</div>
-      <div className="kind-filters">{declarationKinds.map((kind) =>
-        <label key={kind} className="kind-filter"><input type="checkbox" checked={visibleDeclarationKinds.has(kind)} onChange={() => onToggleKind(kind)} /><span>{kind.toLowerCase()}</span></label>
-      )}</div>
-
       <div className="section-heading tree-heading">Packages <span>{packages.length}</span></div>
       <div className="tree-list">{packages.map((pkg) => renderEntry(pkg, 0))}</div>
+
+      <div className="explorer-secondary">
+        <div className="section-heading">Visible levels</div>
+        <div className="count-row"><span>Packages</span><strong>{counts.packages}</strong></div>
+        <div className="count-row"><span>Files</span><strong>{counts.files}</strong></div>
+        <div className="count-row"><span>Declarations</span><strong>{counts.declarations}</strong></div>
+
+        <div className="section-heading filter-heading">Declaration kinds</div>
+        <div className="kind-filters">{declarationKinds.map((kind) =>
+          <label key={kind} className="kind-filter"><input type="checkbox" checked={visibleDeclarationKinds.has(kind)} onChange={() => onToggleKind(kind)} /><span>{kind.toLowerCase()}</span></label>
+        )}</div>
+      </div>
     </div>
   </aside>;
 }

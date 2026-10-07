@@ -20,6 +20,86 @@ export interface VisibleGraph {
   edges: VisibleEdge[];
 }
 
+export interface CardImportLine {
+  id: string;
+  canonicalEdgeID: string;
+  source: string;
+  sourceHandle?: string;
+  target: string;
+  targetHandle?: string;
+  importingFileID?: string;
+  supplyingFileID?: string;
+}
+
+export type ExportUseIndex = ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>;
+
+export function fileDependencyRoles(graph: Graph): { importing: Set<string>; supplying: Set<string> } {
+  const importing = new Set<string>();
+  const supplying = new Set<string>();
+  for (const edge of graph.edges) {
+    if (edge.kind === "IMPORTS") importing.add(edge.from);
+    if (edge.kind === "USES_EXPORT") supplying.add(edge.to);
+  }
+  return { importing, supplying };
+}
+
+export function directlyConnectedPackages(graph: VisibleGraph, packageID: string): Set<string> {
+  const connected = new Set([packageID]);
+  for (const edge of graph.edges) {
+    if (edge.kind !== "IMPORTS") continue;
+    if (edge.source === packageID) connected.add(edge.target);
+    if (edge.target === packageID) connected.add(edge.source);
+  }
+  return connected;
+}
+
+export function buildExportUseIndex(graph: Graph): ExportUseIndex {
+  const parent = new Map(graph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
+  const found = new Map<string, Map<string, Set<string>>>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== "USES_EXPORT") continue;
+    const packageID = parent.get(edge.to);
+    if (!packageID) continue;
+    let packages = found.get(edge.from);
+    if (!packages) { packages = new Map(); found.set(edge.from, packages); }
+    let files = packages.get(packageID);
+    if (!files) { files = new Set(); packages.set(packageID, files); }
+    files.add(edge.to);
+  }
+  return new Map([...found].map(([importer, packages]) => [importer,
+    new Map([...packages].map(([packageID, files]) => [packageID, [...files].sort(compare)]))]));
+}
+
+// Visual direction is dependency -> importer; saved IMPORTS edges remain file -> package.
+export function importCardLines(edge: VisibleEdge, nodes: ReadonlyMap<string, VisibleNode>, exportUses: ExportUseIndex): CardImportLine[] {
+  const importingPackage = nodes.get(edge.source)?.kind === "FILE" ? nodes.get(edge.source)?.parentId ?? edge.source : edge.source;
+  const dependencyExpanded = nodes.get(edge.target)?.expanded ?? false;
+  const importerExpanded = nodes.get(importingPackage)?.expanded ?? false;
+  const importers = edge.evidence.length ? edge.evidence.map((source) => source.from) : [edge.source];
+  if (!dependencyExpanded) {
+    return [{ id: edge.id, canonicalEdgeID: edge.id, source: edge.target, target: importingPackage,
+      targetHandle: importerExpanded && importers.length === 1 ? importers[0] : undefined,
+      importingFileID: importers.length === 1 && edge.evidence.length === 1 ? importers[0] : undefined }];
+  }
+  const lines: CardImportLine[] = [];
+  for (const importer of importers) {
+    const providers = exportUses.get(importer)?.get(edge.target) ?? [];
+    for (const provider of providers.length ? providers : [undefined]) {
+      lines.push({
+        id: `${edge.id}|${importer}|${provider ?? "package"}`,
+        canonicalEdgeID: edge.id,
+        source: edge.target,
+        sourceHandle: provider,
+        target: importingPackage,
+        targetHandle: importerExpanded ? importer : undefined,
+        importingFileID: importer,
+        supplyingFileID: provider,
+      });
+    }
+  }
+  return lines;
+}
+
 export interface PresentationInput {
   canonicalGraph: Graph;
   packageProjection: PackageProjection;
