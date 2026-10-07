@@ -1,4 +1,4 @@
-# Nami
+# nami
 
 An open-source local app that reads a codebase and draws it as a dependency map.
 Everything on screen comes from really parsing the code. The AI explains what
@@ -10,7 +10,7 @@ Run it directly inside a repository:
 nami map .
 ```
 
-Why any of these rules exist is in `local project notes`. This file is the
+The reasons behind these rules are in local project notes. This file is the
 rules themselves.
 
 ## Stack
@@ -24,7 +24,7 @@ Tailwind for styling.
 Language analysis is implemented separately per language behind a shared
 analyzer contract. Start with Go, then Python, then TypeScript/JavaScript.
 
-AI is optional and bring-your-own-key. No AI provider is required for Nami's
+AI is optional and bring-your-own-key. No AI provider is required for nami's
 core analysis or graph features.
 
 CI runs from the start. Deployment should remain possible later without adding
@@ -37,18 +37,18 @@ documentation rather than going from memory.
 
 Spec driven. Nothing gets built without a spec.
 
-- `local project notes` — what this app is and every decision behind it. Read
-  the part you need. Don't ask me to paste it.
-- `local phase specs/phase-NN.md` — one per phase, written just before it starts.
-  Behaviour and an acceptance check, never filenames.
+- Local project notes explain what this app is and the decisions behind it.
+  Read the part you need. Don't ask me to paste it.
+- Local phase specs are written just before each phase starts. They describe
+  behaviour and an acceptance check, never filenames.
 - This file — always true, read on every prompt.
 
 **Starting a phase.** Read this file and that phase's spec. Build what the spec
 asks and stop.
 
-**Dropped into a fresh context and don't know where we are?** Look at which
-files exist in `local phase specs/`, then the git log. The last commit is the last
-phase that passed. Tell me what you've worked out before building on it.
+**Dropped into a fresh context and don't know where we are?** Check the local
+phase specs, then the git log. The last commit is the last phase that passed.
+Tell me what you've worked out before building on it.
 
 **The acceptance check is mine to run, not yours.** Anything requiring visual
 judgement or browser interaction is mine. Don't automate browser acceptance
@@ -104,7 +104,7 @@ You pick the file structure. These are about behaviour.
   themselves.
 - **SQLite stores persisted scans and graph data.** Storage details stay outside
   analysis logic.
-- **The web app talks to Nami through the API.** Source analysis does not happen
+- **The web app talks to nami through the API.** Source analysis does not happen
   inside React components or browser code.
 - **CLI, Web and MCP use the same underlying graph behaviour.** Don't implement
   three versions of dependency traversal.
@@ -136,14 +136,14 @@ CLI / Web / MCP
 ```
 
 Each analyzer may work differently internally, but all analyzers return graph
-facts using Nami's shared node and edge model.
+facts using nami's shared node and edge model.
 
 Adding another language should primarily mean adding another analyzer, not
 rewriting the graph, query, impact or interface layers.
 
 ## Coverage
 
-Nami must say what it understood and what it didn't.
+nami must say what it understood and what it didn't.
 
 Coverage includes things such as files discovered, files analyzed, files
 skipped, relationships resolved and relationships that could not be resolved.
@@ -205,7 +205,7 @@ clicked.
 Directories, files and lower-level source nodes may be folded and expanded so
 the graph remains usable on large repositories.
 
-The web interface is a view over Nami's analysis. It is not where Nami decides
+The web interface is a view over nami's analysis. It is not where nami decides
 what the codebase contains.
 
 ## CI and future deployment
@@ -215,7 +215,7 @@ CI exists from the beginning.
 At minimum, it should eventually verify whatever the current repository can
 verify automatically: tests, lint, builds and deterministic fixture analysis.
 
-Nami should be structured so it can be distributed or deployed later without
+nami should be structured so it can be distributed or deployed later without
 rewriting the analysis core.
 
 Do not introduce Docker, queues, workers, orchestration or hosted infrastructure

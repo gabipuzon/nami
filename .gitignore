@@ -19,3 +19,6 @@ coverage.*
 
 # Nami local data
 .nami/
+
+# Local planning notes
+/docs/
