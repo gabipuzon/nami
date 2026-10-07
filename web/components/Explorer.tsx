@@ -19,9 +19,13 @@ interface ExplorerProps {
 export function Explorer(props: ExplorerProps) {
   const { canonicalGraph, visibleGraph, selectedNodeID, search, visibleDeclarationKinds, onSearch, onSelectNode, onToggle, onToggleKind } = props;
   const packages = visibleGraph.nodes.filter((node) => node.kind === "PACKAGE");
+  const visibleByID = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
   const children = new Map<string, GraphNode[]>();
   for (const node of visibleGraph.nodes) {
-    if (node.parentId) children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]);
+    if (!node.parentId) continue;
+    const siblings = children.get(node.parentId) ?? [];
+    siblings.push(node);
+    children.set(node.parentId, siblings);
   }
   const results = searchNodes(canonicalGraph, search);
   const counts = {
@@ -31,14 +35,14 @@ export function Explorer(props: ExplorerProps) {
   };
 
   const renderEntry = (node: GraphNode, depth: number) => {
-    const item = visibleGraph.nodes.find((visible) => visible.id === node.id);
+    const item = visibleByID.get(node.id);
     if (!item) return null;
     const expandable = item.childCount > 0 && (item.kind === "PACKAGE" || item.kind === "FILE");
     return <div key={item.id}>
       <div className={`tree-row ${selectedNodeID === item.id ? "is-selected" : ""}`} style={{ paddingLeft: 12 + depth * 14 }}>
         {expandable ? <button type="button" className="tree-toggle" onClick={() => onToggle(item.id)} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${item.name}`}>{item.expanded ? "▾" : "▸"}</button> : <span className="tree-spacer" />}
-        <button type="button" className="tree-label" onClick={() => onSelectNode(item.id)} title={item.path}>{item.name}</button>
-        <span className="tree-kind">{item.kind === "PACKAGE" ? "P" : item.kind === "FILE" ? "F" : "·"}</span>
+        <button type="button" className="tree-label" onClick={() => onSelectNode(item.id)} title={item.kind === "PACKAGE" ? `${item.path} · package ${item.name}` : item.path}>{item.kind === "PACKAGE" ? item.path : item.name}</button>
+        <span className={item.kind === "PACKAGE" ? "tree-package" : "tree-kind"}>{item.kind === "PACKAGE" ? item.name : item.kind === "FILE" ? "F" : "·"}</span>
       </div>
       {item.expanded && (children.get(item.id) ?? []).map((child) => renderEntry(child, depth + 1))}
     </div>;

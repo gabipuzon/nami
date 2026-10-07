@@ -11,9 +11,6 @@ interface DetailsProps {
   canonicalGraph: Graph;
   packageProjection: PackageProjection;
   impact: Impact | null;
-  impactLoading: boolean;
-  impactError: string | null;
-  onShowImpact: (id: string) => void;
   onSelectNode: (id: string) => void;
 }
 
@@ -40,7 +37,7 @@ function EvidenceList({ sources, nodes }: { sources: GraphEdge[]; nodes: Readonl
 }
 
 export function Details(props: DetailsProps) {
-  const { selectedNode, selectedEdge, selectedSupplierID, selectedImporterID, canonicalGraph, packageProjection, impact, impactLoading, impactError, onShowImpact, onSelectNode } = props;
+  const { selectedNode, selectedEdge, selectedSupplierID, selectedImporterID, canonicalGraph, packageProjection, impact, onSelectNode } = props;
   const nodes = new Map(canonicalGraph.nodes.map((node) => [node.id, node]));
   const parent = new Map(canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
   const directChildren = (id: string) => canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS" && edge.from === id).map((edge) => edge.to).sort();
@@ -95,17 +92,13 @@ export function Details(props: DetailsProps) {
             <EvidenceList sources={item.sources} nodes={nodes} />
           </section>
         )}
-        <section className="detail-section impact-section">
-          <button className="action-button" type="button" onClick={() => onShowImpact(selectedNode.id)} disabled={impactLoading}>{impactLoading ? "Loading impact…" : "Show impact"}</button>
-          {impactError && <p className="inline-error" role="alert">{impactError}</p>}
-          {impact?.target === selectedNode.id && <>
+        {impact?.target === selectedNode.id && <section className="detail-section impact-section">
             <h3>Potentially affected <span>{impact.affected.length}</span></h3>
             {impact.incomplete && <p className="impact-caveat">Analysis has gaps. This impact map may be incomplete.</p>}
             {impact.affected.length === 0 ? <p className="muted">No known dependent packages</p> : <ol className="affected-list">{impact.affected.map((item) =>
               <li key={item.id}><span className="distance-mark">{item.distance}</span><button type="button" onClick={() => onSelectNode(item.id)}>{nameFor(item.id, nodes)}</button></li>
             )}</ol>}
-          </>}
-        </section>
+        </section>}
       </>}
 
       {isFile && <>

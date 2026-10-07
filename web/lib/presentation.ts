@@ -33,6 +33,25 @@ export interface CardImportLine {
 
 export type ExportUseIndex = ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>;
 
+export interface PackageSourceCounts {
+  imports?: number;
+  exports?: number;
+}
+
+export function packageSourceCounts(graph: Graph): Map<string, PackageSourceCounts> {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const totals = new Map(graph.nodes.filter((node) => node.kind === "PACKAGE").map((node) => [node.id, { imports: 0, exports: 0 } as PackageSourceCounts]));
+  for (const edge of graph.edges) {
+    if (edge.kind !== "CONTAINS") continue;
+    const file = nodes.get(edge.to);
+    const total = totals.get(edge.from);
+    if (file?.kind !== "FILE" || !total) continue;
+    total.imports = total.imports === undefined || file.import_count === undefined ? undefined : total.imports + file.import_count;
+    total.exports = total.exports === undefined || file.export_count === undefined ? undefined : total.exports + file.export_count;
+  }
+  return totals;
+}
+
 export function fileDependencyRoles(graph: Graph): { importing: Set<string>; supplying: Set<string> } {
   const importing = new Set<string>();
   const supplying = new Set<string>();
@@ -125,7 +144,10 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
   for (const edge of canonicalGraph.edges) {
     if (edge.kind !== "CONTAINS") continue;
     const child = canonicalNodes.get(edge.to);
-    if (child) children.set(edge.from, [...(children.get(edge.from) ?? []), child]);
+    if (!child) continue;
+    const siblings = children.get(edge.from) ?? [];
+    siblings.push(child);
+    children.set(edge.from, siblings);
   }
   for (const group of children.values()) group.sort((a, b) => compare(a.id, b.id));
 

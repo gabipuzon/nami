@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, revealNode, type PresentationInput } from "./presentation.ts";
+import { buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, packageSourceCounts, revealNode, type PresentationInput } from "./presentation.ts";
 import { declarationKinds, type Graph, type PackageProjection } from "./types.ts";
 
 const canonicalGraph: Graph = {
@@ -55,6 +55,14 @@ test("only known imports and export uses mark file rows as connected", () => {
   assert.deepEqual([...roles.importing], ["file:a.go"]);
   assert.deepEqual([...roles.supplying], ["file:b.go"]);
   assert.ok(!roles.importing.has("file:quiet.go") && !roles.supplying.has("file:quiet.go"));
+});
+
+test("folded package counts sum saved source counts without filling gaps", () => {
+  const graph: Graph = { ...canonicalGraph, nodes: canonicalGraph.nodes.map((node) => node.id === "file:a.go" ? { ...node, import_count: 2, export_count: 3 } : node.id === "file:quiet.go" ? { ...node, import_count: 1, export_count: 0 } : node) };
+  assert.deepEqual(packageSourceCounts(graph).get("package:A"), { imports: 3, exports: 3 });
+  assert.deepEqual(packageSourceCounts(canonicalGraph).get("package:A"), { imports: undefined, exports: undefined });
+  const partial: Graph = { ...graph, nodes: graph.nodes.map((node) => node.id === "file:quiet.go" ? { ...node, export_count: undefined } : node) };
+  assert.deepEqual(packageSourceCounts(partial).get("package:A"), { imports: 3, exports: undefined });
 });
 
 test("focus keeps only direct package neighbors", () => {

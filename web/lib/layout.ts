@@ -11,7 +11,7 @@ export interface PositionedNode {
 
 export function layoutVisibleGraph(graph: VisibleGraph, cardHeights: ReadonlyMap<string, number> = new Map()): PositionedNode[] {
   const layout = new dagre.graphlib.Graph();
-  layout.setGraph({ rankdir: "LR", nodesep: 32, ranksep: 86, marginx: 48, marginy: 48 });
+  layout.setGraph({ rankdir: "LR", nodesep: 18, ranksep: 52, marginx: 48, marginy: 48 });
   layout.setDefaultEdgeLabel(() => ({}));
   for (const node of graph.nodes) {
     const width = 278;

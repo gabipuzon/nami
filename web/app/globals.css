@@ -491,12 +491,14 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .kind-filter input { appearance: none; width: 8px; height: 8px; border: 1px solid currentColor; border-radius: 50%; }
 .kind-filter input:checked { border-color: var(--accent); background: var(--accent); }
 
-.graph-panel { border-color: transparent; border-radius: 20px; background: var(--bg-canvas); box-shadow: none; }
-.graph-toolbar { top: 14px; left: 14px; min-height: 38px; gap: 12px; padding: 6px 11px; border-color: var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-panel); box-shadow: var(--shadow-sm); }
+.graph-panel { border-color: transparent; border-radius: 20px; background: var(--bg-canvas); box-shadow: none; container-type: inline-size; }
+.graph-toolbar { top: 14px; left: 14px; max-width: calc(100% - 318px); min-height: 38px; gap: 12px; padding: 6px 11px; border-color: var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-panel); box-shadow: var(--shadow-sm); }
 .graph-toolbar strong { color: var(--text-primary); font-weight: 600; }
 .graph-toolbar span { color: var(--text-muted); }
 .graph-toolbar-right > button { background: var(--bg-subtle); color: var(--text-secondary); }
 .graph-toolbar-right > button:hover { background: var(--accent-soft); color: var(--accent); }
+.graph-toolbar-right > button:disabled { cursor: default; opacity: .45; }
+.graph-toolbar-right > button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
 .graph-key i { border-color: var(--edge-muted); }
 .react-flow__controls { border-color: var(--border-subtle) !important; background: var(--bg-panel); box-shadow: var(--shadow-sm) !important; }
 .react-flow__controls-button { background: var(--bg-panel) !important; color: var(--text-secondary) !important; }
@@ -505,7 +507,7 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .map-node, .map-node-package, .map-node-file { border-color: var(--border-subtle); border-radius: 14px; background: var(--node-bg); color: var(--text-primary); box-shadow: none; }
 .map-node:hover, .map-node-package:hover, .map-node-file:hover { border-color: var(--border-strong); background: var(--node-bg-hover); box-shadow: none; }
 .map-node.is-selected, .react-flow__node.selected .map-node { border-color: var(--accent); background: var(--node-bg); box-shadow: 0 0 0 2px var(--selected-glow); }
-.map-node.is-impact-target { border-color: var(--accent); background: var(--node-bg); box-shadow: 0 0 0 2px var(--impact); }
+.map-node.is-impact-target { border-color: var(--impact); background: color-mix(in srgb, var(--impact) 8%, var(--node-bg)); box-shadow: 0 0 0 2px var(--warning-bg); }
 .map-node.is-affected { border-color: var(--impact); background: var(--node-bg); box-shadow: 0 0 0 2px var(--warning-bg); }
 .map-node.is-selected.is-impact-target { box-shadow: 0 0 0 2px var(--impact), 0 0 0 4px var(--selected-glow); }
 .map-node-package { padding: 13px 14px; }
@@ -517,6 +519,12 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .react-flow__node:focus-visible .map-node { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .map-node-package { width: 278px; }
+.map-node-identity { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.map-node-identity .map-node-name { display: block; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-node-package-label { overflow: hidden; color: var(--text-muted); font-family: var(--font-mono), monospace; font-size: 10px; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+.map-node-folded-counts { display: flex; align-items: center; gap: 9px; font-family: var(--font-mono), monospace; white-space: nowrap; }
+.map-node-folded-counts span:first-child { color: var(--import-line); }
+.map-node-folded-counts span:last-child { color: var(--export-line); }
 .map-node-package.is-expanded { height: auto; padding: 12px 0 0; }
 .map-node-package.is-expanded .map-node-main, .map-node-package.is-expanded .map-node-meta { margin-left: 13px; margin-right: 13px; }
 .package-list-head { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; padding: 7px 12px; border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 10px; }
@@ -551,6 +559,34 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .topbar-status, .theme-control select, .graph-toolbar-right > button,
 .detail-list button, .affected-list button, .impact-caveat { border-radius: 4px; }
 .react-flow__controls { border-radius: 4px !important; }
+.graph-head { position: relative; z-index: 5; display: flex; flex: 0 0 auto; align-items: center; gap: 12px; min-height: 46px; padding: 7px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-panel); }
+.graph-head:has(.map-action-error) { flex-wrap: wrap; }
+.graph-title { flex: 0 0 auto; color: var(--text-primary); font-size: 12px; font-weight: 650; }
+.graph-panel .graph-stage { position: relative; inset: auto; flex: 1; min-height: 0; }
+.graph-footer { display: flex; flex: 0 0 auto; align-items: center; gap: 16px; min-height: 30px; padding: 5px 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-muted); font-size: 10px; }
+.graph-stats { display: flex; align-items: center; gap: 9px; white-space: nowrap; }
+.graph-stats span + span { padding-left: 9px; border-left: 1px solid var(--border-subtle); }
+.graph-guidance { flex: 1; text-align: center; }
+.graph-footer .graph-key { display: flex; flex: 0 0 auto; gap: 12px; margin-left: auto; }
+.graph-footer .graph-key span { color: var(--text-muted); font-size: 10px; }
+.map-action-controls { display: flex; flex: 1 1 auto; align-items: center; justify-content: flex-end; gap: 5px; min-width: 0; }
+.map-action-controls button { min-height: 29px; flex: 0 0 auto; border: 1px solid transparent; border-radius: 3px; padding: 0 9px; background: transparent; color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.map-action-controls button:hover:not(:disabled) { background: var(--bg-subtle); color: var(--text-primary); }
+.map-action-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.map-action-controls .map-show-impact { border-color: color-mix(in srgb, var(--impact) 38%, var(--bg-panel)); background: color-mix(in srgb, var(--impact) 13%, var(--bg-panel)); color: var(--impact); font-weight: 650; }
+.map-action-controls .map-show-impact:hover { background: color-mix(in srgb, var(--impact) 20%, var(--bg-panel)); color: var(--impact); }
+.map-action-controls .map-connected-action[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.map-action-controls > button:last-child { margin-left: 3px; border-color: var(--border-subtle); background: var(--bg-subtle); }
+.map-action-controls .map-impact-context { min-width: 0; max-width: 240px; overflow: hidden; border-color: color-mix(in srgb, var(--impact) 40%, var(--bg-panel)); background: color-mix(in srgb, var(--impact) 10%, var(--bg-panel)); color: var(--impact); font-family: var(--font-mono), monospace; text-overflow: ellipsis; }
+.map-action-controls .map-impact-context::before { display: inline-block; width: 5px; height: 5px; margin-right: 7px; border-radius: 50%; background: currentColor; content: ""; vertical-align: 2px; }
+.map-action-controls .map-impact-context:hover { background: color-mix(in srgb, var(--impact) 18%, var(--bg-panel)); color: var(--impact); }
+.map-action-controls .map-clear-impact { border-color: var(--border-subtle); color: var(--text-primary); }
+.map-impact-progress { padding: 0 8px; color: var(--impact); font-size: 11px; }
+.map-action-error { flex: 0 0 100%; color: var(--danger); font-size: 11px; overflow-wrap: anywhere; }
+.graph-panel.is-impact-active .react-flow__node.selected .map-node { border-color: var(--border-subtle); background: var(--node-bg); box-shadow: none; }
+.graph-panel.is-impact-active .react-flow__node.selected .map-node.is-impact-target { border-color: var(--impact); background: color-mix(in srgb, var(--impact) 8%, var(--node-bg)); box-shadow: 0 0 0 2px var(--warning-bg); }
+.graph-panel.is-impact-active .react-flow__node.selected .map-node.is-affected { border-color: var(--impact); box-shadow: 0 0 0 2px var(--warning-bg); }
+.graph-panel.is-impact-active .react-flow__edge.selected .react-flow__edge-path { stroke-width: .75; }
 .map-node, .map-node-package, .map-node-file { border-radius: 4px; }
 .map-node-toggle { border-radius: 3px; }
 .map-node.is-dimmed { opacity: .2; }
@@ -564,8 +600,12 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .package-list-import-label { color: var(--import-line); }
 .package-list-export-label { color: var(--export-line); }
 .package-file-main { position: relative; }
-.package-file-row.is-disconnected { opacity: .42; }
+.package-file-row.is-disconnected { opacity: .74; }
 .package-file-row.is-disconnected:hover, .package-file-row.is-disconnected:has(.is-row-selected) { opacity: 1; }
+.package-file-row.is-line-importer, .package-file-row.is-line-supplier { opacity: 1; }
+.package-file-row.is-line-importer .package-file-main { background: color-mix(in srgb, var(--import-line) 16%, var(--node-bg)); box-shadow: inset 2px 0 var(--import-line); }
+.package-file-row.is-line-supplier .package-file-main { background: color-mix(in srgb, var(--export-line) 16%, var(--node-bg)); box-shadow: inset -2px 0 var(--export-line); }
+.package-file-row.is-line-importer.is-line-supplier .package-file-main { box-shadow: inset 2px 0 var(--import-line), inset -2px 0 var(--export-line); }
 .package-file-row.has-import .package-file-counts span:first-child { color: var(--import-line); }
 .package-file-row.has-export .package-file-counts span:last-child { color: var(--export-line); }
 .package-file-row.has-import .package-file-main::before,
@@ -596,6 +636,24 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .action-button:hover { background: var(--accent-selected); }
 .action-button:active { background: var(--accent); color: #fff; }
 
+/* Keep source paths readable at the map's default one-to-one scale. */
+:root { --text-muted: #617187; }
+:root[data-theme="dark"] { --text-muted: #9bacbf; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --text-muted: #9bacbf; }
+}
+.tree-package { max-width: 76px; overflow: hidden; color: var(--text-muted); font-family: var(--font-mono), monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.tree-toggle { width: 24px; height: 24px; flex-basis: 24px; }
+.tree-spacer { width: 24px; flex-basis: 24px; }
+.tree-label { font-size: 11px; }
+.map-node-toggle { width: 24px; height: 24px; flex-basis: 24px; }
+.map-node-package-label, .map-node-meta, .package-list-head, .package-list-foot { font-size: 11px; }
+.package-file-toggle { flex-basis: 24px; height: 24px; }
+.package-file-main:not(:has(.package-file-toggle)) .package-file-name { margin-left: 28px; }
+.package-file-name, .package-file-counts, .package-declaration { font-size: 11px; }
+.package-declaration small { font-size: 10px; }
+.map-action-controls button { font-size: 11px; }
+
 @media (max-width: 1200px) {
   .workspace { grid-template-columns: 194px minmax(0,1fr) 248px; gap: 10px; }
   .brand { flex-basis: 104px; }
@@ -613,4 +671,15 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
   .topbar { min-height: 112px; }
   .coverage-area { top: 104px; }
   .graph-toolbar { right: 12px; left: 12px; max-width: none; }
+}
+@container (max-width: 800px) {
+  .graph-key { display: none; }
+}
+@container (max-width: 650px) {
+  .graph-head { align-items: flex-start; flex-wrap: wrap; gap: 4px; padding: 8px 10px; }
+  .graph-title { flex-basis: 100%; }
+  .map-action-controls { justify-content: flex-start; flex-wrap: wrap; gap: 2px; }
+  .map-action-controls button { min-height: 26px; }
+  .graph-footer { flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px; }
+  .graph-guidance { order: 3; flex: 0 0 100%; text-align: left; }
 }
