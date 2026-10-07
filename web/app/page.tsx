@@ -57,13 +57,16 @@ function GraphCanvas(props: GraphCanvasProps) {
       <strong className="graph-title">Dependency map</strong>
       <div className="map-action-controls" role="group" aria-label="Map actions">
         {impactTargetID && <button className="map-impact-context" type="button" onClick={() => onSelectNode(impactTargetID)} title={`Inspect impact target: ${impactTargetName ?? impactTargetID}`} aria-label={`Inspect impact target ${impactTargetName ?? impactTargetID}`}>Impact: {impactTargetName ?? impactTargetID}</button>}
-        {impactLoading ? <span className="map-impact-progress" role="status">Calculating impact…</span> : selectedPackageID && selectedPackageID !== impactTargetID && <button className="map-show-impact" type="button" onClick={() => onShowImpact(selectedPackageID)}>{impactActive ? "Update impact" : "Show impact"}</button>}
-        {impactActive && <button className="map-clear-impact" type="button" onClick={onClearImpact}>Clear impact</button>}
+        <div className="map-impact-actions">
+          {impactLoading ? <span className="map-impact-progress" role="status">Calculating impact…</span> : selectedPackageID && selectedPackageID !== impactTargetID && <button className="map-show-impact" type="button" onClick={() => onShowImpact(selectedPackageID)}>{impactActive ? "Update impact" : "Show impact"}</button>}
+          {impactActive && <button className="map-clear-impact" type="button" onClick={onClearImpact}>Clear impact</button>}
+        </div>
         {!impactActive && focusActive && <button className="map-connected-action" type="button" onClick={onToggleConnectedOnly} aria-pressed={connectedOnly}>
           {connectedOnly ? `Show full map (${hiddenPackageCount} hidden)` : "Show connected only"}
         </button>}
-        {!impactActive && focusActive && <button type="button" onClick={onClearSelection}>Remove focus</button>}
-        <button type="button" onClick={onResetPositions} title="Restore the current graph's starting layout">Reset positions</button>
+        <div className="map-utility-actions">
+          <button type="button" onClick={onResetPositions} title="Restore the current graph's starting layout">Reset positions</button>
+        </div>
       </div>
       {impactError && <span className="map-action-error" role="alert">{impactError}</span>}
     </div>
@@ -75,11 +78,11 @@ function GraphCanvas(props: GraphCanvasProps) {
         onNodeDragStop={(_, node) => onDragStop(node.id, node.position)}
         onEdgeClick={(_, edge) => onSelectEdge(typeof edge.data?.canonicalEdgeID === "string" ? edge.data.canonicalEdgeID : edge.id, typeof edge.data?.supplyingFileID === "string" ? edge.data.supplyingFileID : undefined, typeof edge.data?.importingFileID === "string" ? edge.data.importingFileID : undefined)}
         onPaneClick={onClearSelection}
-        fitView fitViewOptions={{ padding: 0.08, minZoom: 0.01, maxZoom: 1 }} minZoom={0.01} maxZoom={2} proOptions={{ hideAttribution: true }}
+        fitView fitViewOptions={{ padding: 0.08, minZoom: 0.01, maxZoom: 1.15 }} minZoom={0.01} maxZoom={2} proOptions={{ hideAttribution: true }}
         nodesConnectable={false} deleteKeyCode={null} edgesFocusable elementsSelectable
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--grid-dot)" />
-        <Controls showInteractive={false} fitViewOptions={{ padding: 0.08, minZoom: 0.01, maxZoom: 1 }} />
+        <Controls showInteractive={false} fitViewOptions={{ padding: 0.08, minZoom: 0.01, maxZoom: 1.15 }} />
       </ReactFlow>}
     </div>
     <div className="graph-footer">
@@ -287,7 +290,7 @@ function MapApp() {
     const selected = !impact && selectedEdgeID === item.id;
     const focused = focusedPackageID !== null && (line.source === focusedPackageID || line.target === focusedPackageID);
     const impacted = item.projectionEdge && impactEdges.has(`${item.projectionEdge.from}->${item.projectionEdge.to}`);
-    const opacity = selected ? 1 : focused ? .95 : relatedPackages !== null ? .06 : impacted ? .85 : .6;
+    const opacity = selected ? 1 : focused ? 1 : relatedPackages !== null ? .18 : impacted ? 1 : impact ? .4 : .78;
     return {
       id: line.id,
       source: line.source,
@@ -298,7 +301,7 @@ function MapApp() {
       interactionWidth: 8,
       type: "dependency",
       selectable: item.kind === "IMPORTS",
-      style: { strokeOpacity: opacity, strokeWidth: selected ? 1.3 : focused || impacted ? 1.05 : .75 },
+      style: { strokeOpacity: opacity, strokeWidth: selected ? 1.6 : focused || impacted ? 1.4 : .95 },
     };
   }), [shownLines, importEdgesByID, selectedEdgeID, focusedPackageID, relatedPackages, impact, impactEdges]);
 

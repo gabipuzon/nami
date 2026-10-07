@@ -9,14 +9,12 @@ export interface PositionedNode {
   height: number;
 }
 
-export function layoutVisibleGraph(graph: VisibleGraph, cardHeights: ReadonlyMap<string, number> = new Map()): PositionedNode[] {
+export function layoutVisibleGraph(graph: VisibleGraph): PositionedNode[] {
   const layout = new dagre.graphlib.Graph();
-  layout.setGraph({ rankdir: "LR", nodesep: 18, ranksep: 52, marginx: 48, marginy: 48 });
+  layout.setGraph({ rankdir: "LR", nodesep: 36, ranksep: 42, marginx: 32, marginy: 32 });
   layout.setDefaultEdgeLabel(() => ({}));
   for (const node of graph.nodes) {
-    const width = 278;
-    const height = cardHeights.get(node.id) ?? 72;
-    layout.setNode(node.id, { width, height });
+    layout.setNode(node.id, { width: 304, height: 82 });
   }
   for (const edge of graph.edges) layout.setEdge(edge.source, edge.target);
   dagre.layout(layout);

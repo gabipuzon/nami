@@ -25,7 +25,10 @@ function FactList({ title, ids, nodes, onSelectNode }: {
   return <section className="detail-section">
     <h3>{title} <span>{ids.length}</span></h3>
     {ids.length === 0 ? <p className="muted">None known</p> : <ul className="detail-list">{ids.map((id) =>
-      <li key={id}><button type="button" onClick={() => onSelectNode(id)} title={id}>{nameFor(id, nodes)}</button></li>
+      <li key={id}><button type="button" onClick={() => onSelectNode(id)} title={nodes.get(id)?.path ?? id}>
+        <span className="detail-row-name">{nodes.get(id)?.kind === "PACKAGE" ? nodes.get(id)?.path : nameFor(id, nodes)}</span>
+        <span className="detail-row-meta">{nodes.get(id)?.kind === "PACKAGE" ? `package ${nameFor(id, nodes)}` : nodes.get(id)?.path}</span>
+      </button></li>
     )}</ul>}
   </section>;
 }
@@ -76,6 +79,7 @@ export function Details(props: DetailsProps) {
   const outgoing = isPackage ? packageOutgoing(selectedNode.id) : canonicalOutgoing(selectedNode.id);
   const incoming = isPackage ? packageIncoming(selectedNode.id) : canonicalIncoming(selectedNode.id);
   const files = isPackage ? directChildren(selectedNode.id).filter((id) => nodes.get(id)?.kind === "FILE") : [];
+  const outgoingEvidence = isPackage ? packageProjection.evidence.filter((item) => item.edge.from === selectedNode.id) : [];
   return <aside className="details-panel" aria-label="Details">
     <div className="panel-heading"><h2>Inspector</h2><span>{selectedNode.kind.toLowerCase()}</span></div>
     <div className="details-scroll">
@@ -83,15 +87,16 @@ export function Details(props: DetailsProps) {
       {isPackage && <div className="detail-summary"><span>{files.length} files</span><span>{outgoing.length} dependencies</span><span>{incoming.length} dependents</span></div>}
 
       {isPackage && <>
-        <FactList title="Files" ids={files} nodes={nodes} onSelectNode={onSelectNode} />
         <FactList title="Depends on" ids={outgoing} nodes={nodes} onSelectNode={onSelectNode} />
         <FactList title="Depended on by" ids={incoming} nodes={nodes} onSelectNode={onSelectNode} />
-        {packageProjection.evidence.filter((item) => item.edge.from === selectedNode.id).map((item) =>
-          <section className="detail-section" key={`${item.edge.from}->${item.edge.to}`}>
-            <h3>Evidence for {nameFor(item.edge.to, nodes)}</h3>
+        <FactList title="Files" ids={files} nodes={nodes} onSelectNode={onSelectNode} />
+        {outgoingEvidence.length > 0 && <details className="detail-evidence">
+          <summary>Import evidence <span>{outgoingEvidence.reduce((count, item) => count + item.sources.length, 0)}</span></summary>
+          {outgoingEvidence.map((item) => <section key={`${item.edge.from}->${item.edge.to}`}>
+            <h3>{nodes.get(item.edge.to)?.path ?? nameFor(item.edge.to, nodes)}</h3>
             <EvidenceList sources={item.sources} nodes={nodes} />
-          </section>
-        )}
+          </section>)}
+        </details>}
         {impact?.target === selectedNode.id && <section className="detail-section impact-section">
             <h3>Potentially affected <span>{impact.affected.length}</span></h3>
             {impact.incomplete && <p className="impact-caveat">Analysis has gaps. This impact map may be incomplete.</p>}

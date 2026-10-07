@@ -41,8 +41,11 @@ export function Explorer(props: ExplorerProps) {
     return <div key={item.id}>
       <div className={`tree-row ${selectedNodeID === item.id ? "is-selected" : ""}`} style={{ paddingLeft: 12 + depth * 14 }}>
         {expandable ? <button type="button" className="tree-toggle" onClick={() => onToggle(item.id)} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${item.name}`}>{item.expanded ? "▾" : "▸"}</button> : <span className="tree-spacer" />}
-        <button type="button" className="tree-label" onClick={() => onSelectNode(item.id)} title={item.kind === "PACKAGE" ? `${item.path} · package ${item.name}` : item.path}>{item.kind === "PACKAGE" ? item.path : item.name}</button>
-        <span className={item.kind === "PACKAGE" ? "tree-package" : "tree-kind"}>{item.kind === "PACKAGE" ? item.name : item.kind === "FILE" ? "F" : "·"}</span>
+        <button type="button" className="tree-label" onClick={() => onSelectNode(item.id)} title={item.kind === "PACKAGE" ? `${item.path} · package ${item.name}` : item.path}>
+          <span className="tree-label-primary">{item.kind === "PACKAGE" ? item.path : item.name}</span>
+          {item.kind === "PACKAGE" && <span className="tree-label-meta">package {item.name}</span>}
+        </button>
+        {item.kind !== "PACKAGE" && <span className="tree-kind">{item.kind === "FILE" ? "F" : "·"}</span>}
       </div>
       {item.expanded && (children.get(item.id) ?? []).map((child) => renderEntry(child, depth + 1))}
     </div>;
