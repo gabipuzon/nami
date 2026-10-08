@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/gabipuzon/nami/internal/analyzer/goanalyzer"
+	"github.com/gabipuzon/nami/internal/analyzer/pythonanalyzer"
 	"github.com/gabipuzon/nami/internal/detect"
 	"github.com/gabipuzon/nami/internal/graph"
 	"github.com/gabipuzon/nami/internal/scanner"
@@ -50,18 +51,23 @@ func Map(root string) (Result, error) {
 		return Result{}, err
 	}
 	goFiles := detect.GoFiles(scan.Files)
+	pythonFiles := detect.PythonFiles(scan.Files)
 	var skippedPaths []string
 	for _, skipped := range scan.Skipped {
 		skippedPaths = append(skippedPaths, skipped.Path)
 	}
 	unsupported := detect.UnsupportedSources(scan.Files)
 	goResult := goanalyzer.Analyze(absRoot, goFiles, scan.Files)
-	graph, err := graph.Build(goResult.Fragment)
+	pythonResult := pythonanalyzer.Analyze(absRoot, pythonFiles)
+	graph, err := graph.Build(goResult.Fragment, pythonResult.Fragment)
 	if err != nil {
 		return Result{}, err
 	}
 	var issues []Issue
 	for _, issue := range goResult.Issues {
+		issues = append(issues, Issue{Kind: issue.Kind, Path: issue.Path, Import: issue.Import, Reason: issue.Reason})
+	}
+	for _, issue := range pythonResult.Issues {
 		issues = append(issues, Issue{Kind: issue.Kind, Path: issue.Path, Import: issue.Import, Reason: issue.Reason})
 	}
 	for _, skipped := range scan.Skipped {
@@ -86,17 +92,17 @@ func Map(root string) (Result, error) {
 	coverage := Coverage{
 		Status:               "complete",
 		FilesDiscovered:      scan.Discovered,
-		SupportedSourceFiles: len(goFiles) + len(detect.GoFiles(skippedPaths)),
-		FilesAnalyzed:        goResult.FilesAnalyzed,
+		SupportedSourceFiles: len(goFiles) + len(pythonFiles) + len(detect.GoFiles(skippedPaths)) + len(detect.PythonFiles(skippedPaths)),
+		FilesAnalyzed:        goResult.FilesAnalyzed + pythonResult.FilesAnalyzed,
 		FilesSkipped:         len(scan.Skipped) + len(unsupported),
-		FilesFailed:          goResult.FilesFailed,
-		ImportsDiscovered:    goResult.Imports.Discovered,
-		InternalResolved:     goResult.Imports.InternalResolved,
-		StandardLibrary:      goResult.Imports.StandardLibrary,
-		External:             goResult.Imports.External,
-		Unresolved:           goResult.Imports.Unresolved,
+		FilesFailed:          goResult.FilesFailed + pythonResult.FilesFailed,
+		ImportsDiscovered:    goResult.Imports.Discovered + pythonResult.Imports.Discovered,
+		InternalResolved:     goResult.Imports.InternalResolved + pythonResult.Imports.InternalResolved,
+		StandardLibrary:      goResult.Imports.StandardLibrary + pythonResult.Imports.StandardLibrary,
+		External:             goResult.Imports.External + pythonResult.Imports.External,
+		Unresolved:           goResult.Imports.Unresolved + pythonResult.Imports.Unresolved,
 		Cgo:                  goResult.Imports.Cgo,
-		Unclassified:         goResult.Imports.Unclassified,
+		Unclassified:         goResult.Imports.Unclassified + pythonResult.Imports.Unclassified,
 	}
 	if len(issues) > 0 {
 		coverage.Status = "completed_with_gaps"

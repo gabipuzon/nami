@@ -48,7 +48,7 @@ func TestMapFixture(t *testing.T) {
 			imports++
 		}
 	}
-	if modules != 1 || packages != 4 || files != 5 || declarations != 4 || contains != 13 || imports != 5 {
+	if modules != 1 || packages != 4 || files != 6 || declarations != 4 || contains != 13 || imports != 5 {
 		t.Fatalf("modules=%d packages=%d files=%d declarations=%d contains=%d imports=%d", modules, packages, files, declarations, contains, imports)
 	}
 	wantEdges := []graph.Edge{
@@ -81,12 +81,12 @@ func TestMapFixture(t *testing.T) {
 			t.Errorf("missing edge %+v", want)
 		}
 	}
-	if len(first.Issues) != 3 || first.Issues[0].Kind != "UNCLASSIFIED_IMPORT" || first.Issues[0].Import != "github.com/external/thing" || first.Issues[1].Kind != "UNRESOLVED_IMPORT" || first.Issues[1].Import != "example.com/fixture/missing" || first.Issues[2].Kind != "UNSUPPORTED_FILE" || first.Issues[2].Path != "notes.py" {
+	if len(first.Issues) != 2 || first.Issues[0].Kind != "UNCLASSIFIED_IMPORT" || first.Issues[0].Import != "github.com/external/thing" || first.Issues[1].Kind != "UNRESOLVED_IMPORT" || first.Issues[1].Import != "example.com/fixture/missing" {
 		t.Fatalf("issues = %+v", first.Issues)
 	}
 	wantCoverage := Coverage{
-		Status: "completed_with_gaps", FilesDiscovered: 8, SupportedSourceFiles: 5,
-		FilesAnalyzed: 5, FilesSkipped: 1, FilesFailed: 0,
+		Status: "completed_with_gaps", FilesDiscovered: 8, SupportedSourceFiles: 6,
+		FilesAnalyzed: 6, FilesSkipped: 0, FilesFailed: 0,
 		ImportsDiscovered: 8, InternalResolved: 5, StandardLibrary: 1,
 		Unresolved: 1, Unclassified: 1,
 	}
@@ -402,4 +402,58 @@ func containsEdge(edges []graph.Edge, target graph.Edge) bool {
 		}
 	}
 	return false
+}
+
+func TestMixedPythonRepository(t *testing.T) {
+	root := t.TempDir()
+	for rel, source := range map[string]string{"go.mod": "module example.com/mixed\ngo 1.25.0\n", "main.go": "package main\nfunc main() {}\n", "users/__init__.py": "", "users/models.py": "class User:\n pass\n", "users/service.py": "from . import models\nasync def build():\n pass\n", "broken.py": "def broken(:\n"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Coverage.Status != "completed_with_gaps" || result.Coverage.SupportedSourceFiles != 5 || result.Coverage.FilesAnalyzed != 4 || result.Coverage.FilesFailed != 1 || result.Coverage.InternalResolved != 1 {
+		t.Fatalf("coverage: %+v", result.Coverage)
+	}
+	if len(result.Issues) != 1 || result.Issues[0].Kind != "FAILED_FILE" || result.Issues[0].Path != "broken.py" {
+		t.Fatalf("issues: %+v", result.Issues)
+	}
+	languages := map[string]bool{}
+	for _, node := range result.Graph.Nodes {
+		if node.Language == "" {
+			t.Fatalf("missing language: %+v", node)
+		}
+		languages[node.Language] = true
+	}
+	if !languages["go"] || !languages["python"] {
+		t.Fatalf("languages: %+v", languages)
+	}
+	t.Setenv("PATH", t.TempDir())
+	missing, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing.Coverage.FilesAnalyzed != 1 || missing.Coverage.FilesFailed != 4 {
+		t.Fatalf("runtime coverage: %+v", missing.Coverage)
+	}
+	for _, node := range missing.Graph.Nodes {
+		if node.Language != "go" {
+			t.Fatalf("runtime failure lost Go isolation: %+v", node)
+		}
+	}
+	found := false
+	for _, issue := range missing.Issues {
+		if issue.Kind == "PYTHON_RUNTIME_ERROR" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing Python runtime not reported")
+	}
 }

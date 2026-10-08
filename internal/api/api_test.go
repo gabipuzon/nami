@@ -246,3 +246,21 @@ func TestQueryIDsWithReservedCharacters(t *testing.T) {
 		t.Fatal("node ID was not decoded")
 	}
 }
+
+func TestNodeLanguageAndIndependentCounts(t *testing.T) {
+	node := convertNode(graph.Node{ID: "file:tool.py", Kind: graph.File, Language: "python", ImportCount: 0, HasImportCount: true})
+	data, err := json.Marshal(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["language"] != "python" || fields["import_count"] != float64(0) {
+		t.Fatalf("DTO: %s", data)
+	}
+	if _, exists := fields["export_count"]; exists {
+		t.Fatalf("invented export count: %s", data)
+	}
+}

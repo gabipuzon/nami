@@ -53,10 +53,11 @@ export function packageSourceCounts(graph: Graph): Map<string, PackageSourceCoun
 }
 
 export function fileDependencyRoles(graph: Graph): { importing: Set<string>; supplying: Set<string> } {
+  const fileIDs = new Set(graph.nodes.filter((node) => node.kind === "FILE").map((node) => node.id));
   const importing = new Set<string>();
   const supplying = new Set<string>();
   for (const edge of graph.edges) {
-    if (edge.kind === "IMPORTS") importing.add(edge.from);
+    if (edge.kind === "IMPORTS") { importing.add(edge.from); if (fileIDs.has(edge.to)) supplying.add(edge.to); }
     if (edge.kind === "USES_EXPORT") supplying.add(edge.to);
   }
   return { importing, supplying };
@@ -102,7 +103,8 @@ export function importCardLines(edge: VisibleEdge, nodes: ReadonlyMap<string, Vi
   }
   const lines: CardImportLine[] = [];
   for (const importer of importers) {
-    const providers = exportUses.get(importer)?.get(edge.target) ?? [];
+    const moduleProviders = edge.evidence.filter((fact) => fact.from === importer && nodes.get(fact.to)?.kind === "FILE").map((fact) => fact.to);
+    const providers = moduleProviders.length ? moduleProviders : exportUses.get(importer)?.get(edge.target) ?? [];
     for (const provider of providers.length ? providers : [undefined]) {
       lines.push({
         id: `${edge.id}|${importer}|${provider ?? "package"}`,
@@ -160,7 +162,7 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
     nodes.push({
       ...node,
       parentId,
-      childCount: (children.get(node.id) ?? []).length,
+      childCount: (children.get(node.id) ?? []).filter((child) => node.kind !== "PACKAGE" || child.kind === "FILE").length,
       expanded: node.kind === "PACKAGE" ? expandedPackages.has(node.id) :
         node.kind === "FILE" ? expandedFiles.has(node.id) : false,
     });
@@ -184,6 +186,14 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
     }
   }
 
+  const parent = new Map(canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
+  for (const file of canonicalGraph.nodes.filter((node) => node.kind === "FILE" && !parent.has(node.id))) {
+    addNode(file);
+    if (expandedFiles.has(file.id)) for (const declaration of children.get(file.id) ?? []) {
+      if (isDeclarationKind(declaration.kind) && visibleDeclarationKinds.has(declaration.kind)) addNode(declaration, file.id);
+    }
+  }
+
   const evidenceByEdge = new Map(packageProjection.evidence.map((item) => [edgeKey(item.edge), item.sources]));
   for (const edge of [...packageProjection.graph.edges].sort((a, b) => compare(edgeKey(a), edgeKey(b)))) {
     if (edge.kind !== "IMPORTS" || !visibleIDs.has(edge.from) || !visibleIDs.has(edge.to)) continue;
@@ -193,9 +203,18 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
       continue;
     }
     for (const source of [...evidence].sort((a, b) => compare(edgeKey(a), edgeKey(b)))) {
-      if (source.kind !== "IMPORTS" || !visibleIDs.has(source.from) || source.to !== edge.to || !canonicalImports.has(edgeKey(source))) continue;
-      edges.push({ id: edgeKey(source), kind: "IMPORTS", source: source.from, target: source.to, projectionEdge: edge, evidence: [source] });
+      if (source.kind !== "IMPORTS" || !visibleIDs.has(source.from) || !canonicalImports.has(edgeKey(source))) continue;
+      edges.push({ id: edgeKey(source), kind: "IMPORTS", source: source.from, target: edge.to, projectionEdge: edge, evidence: [source] });
     }
+  }
+
+  // Imports without a package projection still use the saved canonical fact.
+  const projectedFacts = new Set(packageProjection.evidence.flatMap((item) => item.sources.map(edgeKey)));
+  for (const fact of canonicalGraph.edges) {
+    if (fact.kind !== "IMPORTS" || projectedFacts.has(edgeKey(fact))) continue;
+    const source = parent.get(fact.from) ?? fact.from;
+    const target = canonicalNodes.get(fact.to)?.kind === "FILE" ? parent.get(fact.to) ?? fact.to : fact.to;
+    if (visibleIDs.has(source) && visibleIDs.has(target)) edges.push({ id: edgeKey(fact), kind: "IMPORTS", source: visibleIDs.has(fact.from) ? fact.from : source, target, evidence: [fact] });
   }
 
   nodes.sort((a, b) => compare(a.id, b.id));

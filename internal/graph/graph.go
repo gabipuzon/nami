@@ -12,6 +12,7 @@ const (
 	Package   NodeKind = "PACKAGE"
 	File      NodeKind = "FILE"
 	Function  NodeKind = "FUNCTION"
+	Class     NodeKind = "CLASS"
 	Method    NodeKind = "METHOD"
 	Struct    NodeKind = "STRUCT"
 	Interface NodeKind = "INTERFACE"
@@ -22,7 +23,7 @@ const (
 
 func IsDeclaration(kind NodeKind) bool {
 	switch kind {
-	case Function, Method, Struct, Interface, Type, Variable, Constant:
+	case Function, Class, Method, Struct, Interface, Type, Variable, Constant:
 		return true
 	default:
 		return false
@@ -38,13 +39,15 @@ const (
 )
 
 type Node struct {
-	ID              string
-	Kind            NodeKind
-	Path            string
-	Name            string
-	ImportCount     int
-	ExportCount     int
-	HasSourceCounts bool
+	ID             string
+	Kind           NodeKind
+	Path           string
+	Name           string
+	ImportCount    int
+	ExportCount    int
+	HasImportCount bool
+	HasExportCount bool
+	Language       string
 }
 
 type Edge struct {

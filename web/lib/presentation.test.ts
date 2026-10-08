@@ -163,3 +163,48 @@ test("identical facts and view state produce identical output", () => {
   state.expandedFiles = new Set(["file:a.go"]);
   assert.deepEqual(buildVisibleGraph(state), buildVisibleGraph(state));
 });
+
+test("Python module imports keep canonical evidence and attach to supplying file rows", () => {
+  const pythonGraph: Graph = {
+    nodes: [
+      { id: "python-package:users", kind: "PACKAGE", language: "python", name: "users", path: "users" },
+      { id: "python-package:core", kind: "PACKAGE", language: "python", name: "core", path: "core" },
+      { id: "file:users/service.py", kind: "FILE", language: "python", name: "service.py", path: "users/service.py", import_count: 1 },
+      { id: "file:core/models.py", kind: "FILE", language: "python", name: "models.py", path: "core/models.py", import_count: 0 },
+      { id: "class:core/models.py#User", kind: "CLASS", language: "python", name: "User", path: "core/models.py" },
+    ],
+    edges: [
+      { kind: "CONTAINS", from: "python-package:users", to: "file:users/service.py" },
+      { kind: "CONTAINS", from: "python-package:core", to: "file:core/models.py" },
+      { kind: "CONTAINS", from: "file:core/models.py", to: "class:core/models.py#User" },
+      { kind: "IMPORTS", from: "file:users/service.py", to: "file:core/models.py" },
+    ],
+  };
+  const edge = { kind: "IMPORTS" as const, from: "python-package:users", to: "python-package:core" };
+  const projection: PackageProjection = { graph: { nodes: pythonGraph.nodes.filter((node) => node.kind === "PACKAGE"), edges: [edge] }, evidence: [{ edge, sources: [pythonGraph.edges[3]] }] };
+  const visible = buildVisibleGraph({ canonicalGraph: pythonGraph, packageProjection: projection, expandedPackages: new Set([edge.from, edge.to]), expandedFiles: new Set(["file:core/models.py"]), visibleDeclarationKinds: new Set(declarationKinds) });
+  const dependency = visible.edges.find((edge) => edge.kind === "IMPORTS")!;
+  assert.deepEqual(dependency.evidence, [pythonGraph.edges[3]]);
+  assert.equal(dependency.target, "python-package:core");
+  const lines = importCardLines(dependency, new Map(visible.nodes.map((node) => [node.id, node])), buildExportUseIndex(pythonGraph));
+  assert.equal(lines[0].sourceHandle, "file:core/models.py");
+  assert.equal(lines[0].targetHandle, "file:users/service.py");
+  assert.ok(visible.nodes.some((node) => node.kind === "CLASS"));
+  assert.deepEqual(packageSourceCounts(pythonGraph).get("python-package:core"), { imports: 0, exports: undefined });
+  assert.ok(fileDependencyRoles(pythonGraph).supplying.has("file:core/models.py"));
+});
+
+test("standalone Python files and declarations render without synthetic packages", () => {
+  const graph: Graph = {
+    nodes: [
+      { id: "file:tool.py", kind: "FILE", language: "python", path: "tool.py", name: "tool.py" },
+      { id: "class:tool.py#Tool", kind: "CLASS", language: "python", path: "tool.py", name: "Tool" },
+    ],
+    edges: [{ kind: "CONTAINS", from: "file:tool.py", to: "class:tool.py#Tool" }],
+  };
+  const state = revealNode(graph, "class:tool.py#Tool", { expandedPackages: new Set(), expandedFiles: new Set(), visibleDeclarationKinds: new Set() });
+  const visible = buildVisibleGraph({ canonicalGraph: graph, packageProjection: { graph: { nodes: [], edges: [] }, evidence: [] }, ...state });
+  assert.equal(visible.nodes.length, 2);
+  assert.equal(visible.nodes.find((node) => node.kind === "FILE")?.parentId, undefined);
+  assert.equal(visible.nodes.find((node) => node.kind === "CLASS")?.parentId, "file:tool.py");
+});

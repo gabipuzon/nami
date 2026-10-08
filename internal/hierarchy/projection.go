@@ -29,14 +29,24 @@ func ProjectPackages(g graph.Graph) (Projection, error) {
 	}
 	support := make(map[graph.Edge]map[graph.Edge]bool)
 	for _, edge := range g.Edges {
-		if edge.Kind != graph.Imports || h.nodes[edge.From].Kind != graph.File || h.nodes[edge.To].Kind != graph.Package {
+		if edge.Kind != graph.Imports || h.nodes[edge.From].Kind != graph.File {
 			continue
 		}
 		parentID, ok := h.parents[edge.From]
 		if !ok || h.nodes[parentID].Kind != graph.Package {
 			continue
 		}
-		derived := graph.Edge{Kind: graph.Imports, From: parentID, To: edge.To}
+		targetID := edge.To
+		target := h.nodes[targetID]
+		if target.Kind == graph.File && target.Language == "python" {
+			targetID, ok = h.parents[targetID]
+			if !ok || h.nodes[targetID].Kind != graph.Package {
+				continue
+			}
+		} else if target.Kind != graph.Package {
+			continue
+		}
+		derived := graph.Edge{Kind: graph.Imports, From: parentID, To: targetID}
 		if support[derived] == nil {
 			support[derived] = make(map[graph.Edge]bool)
 		}

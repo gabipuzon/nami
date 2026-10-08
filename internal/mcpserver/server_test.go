@@ -39,7 +39,7 @@ func fixture(t *testing.T) storage.Snapshot {
 		edges = append(edges, graph.Edge{Kind: graph.Contains, From: "module:test", To: item.id})
 	}
 	for _, item := range []struct{ id, parent, path string }{{fileAZ, packageA, "a/z.go"}, {fileB, packageB, "b/b.go"}, {fileA, packageA, "a/a.go"}} {
-		nodes = append(nodes, graph.Node{ID: item.id, Kind: graph.File, Name: filepath.Base(item.path), Path: item.path, ImportCount: 2, ExportCount: 3, HasSourceCounts: true})
+		nodes = append(nodes, graph.Node{ID: item.id, Kind: graph.File, Name: filepath.Base(item.path), Path: item.path, ImportCount: 2, ExportCount: 3, HasImportCount: true, HasExportCount: true})
 		edges = append(edges, graph.Edge{Kind: graph.Contains, From: item.parent, To: item.id})
 	}
 	for _, kind := range []graph.NodeKind{graph.Function, graph.Method, graph.Struct, graph.Interface, graph.Type, graph.Variable, graph.Constant} {
@@ -506,5 +506,61 @@ func TestInternalErrorsDoNotLeakDiagnostics(t *testing.T) {
 	}
 	if !result.IsError || output.Error.Code != "internal_error" || bytes.Contains(domainJSON(t, result), []byte("private")) {
 		t.Fatalf("internal error = %s", domainJSON(t, result))
+	}
+}
+
+func TestPythonSnapshotTools(t *testing.T) {
+	root := t.TempDir()
+	for rel, source := range map[string]string{"users/__init__.py": "", "users/models.py": "class User:\n pass\n", "users/service.py": "from . import models\ndef build():\n pass\nclass Service:\n async def save(self):\n  pass\n"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := analysis.Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Save(root, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server, err := Load(root, summary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cs := connect(t, server)
+	search := decode[struct{ Nodes []nodeJSON }](t, call(t, ctx, cs, "nami_search_nodes", map[string]any{"query": "Service", "kinds": []string{"CLASS"}}))
+	if len(search.Nodes) != 1 || search.Nodes[0].Language != "python" || search.Nodes[0].Kind != graph.Class {
+		t.Fatalf("search: %+v", search)
+	}
+	inspect := decode[struct{ Node nodeJSON }](t, call(t, ctx, cs, "nami_inspect_node", map[string]any{"node_id": "file:users/service.py"}))
+	if inspect.Node.Language != "python" || inspect.Node.ImportCount == nil || *inspect.Node.ImportCount != 1 || inspect.Node.ExportCount != nil {
+		t.Fatalf("inspection: %+v", inspect)
+	}
+	symbols := decode[struct{ Symbols []nodeJSON }](t, call(t, ctx, cs, "nami_file_symbols", map[string]any{"file_id": "file:users/service.py"}))
+	if len(symbols.Symbols) != 3 {
+		t.Fatalf("symbols: %+v", symbols)
+	}
+	for _, node := range symbols.Symbols {
+		if !graph.IsDeclaration(node.Kind) || node.Language != "python" {
+			t.Fatalf("symbol: %+v", node)
+		}
+	}
+	dependency := decode[struct {
+		Found bool
+		Path  []string
+	}](t, call(t, ctx, cs, "nami_dependency_path", map[string]any{"from_id": "file:users/service.py", "to_id": "file:users/models.py", "scope": "canonical"}))
+	if !dependency.Found || !reflect.DeepEqual(dependency.Path, []string{"file:users/service.py", "file:users/models.py"}) {
+		t.Fatalf("dependency: %+v", dependency)
 	}
 }

@@ -16,15 +16,25 @@ func GoFiles(files []string) []string {
 	return goFiles
 }
 
-// UnsupportedSources identifies source languages planned beyond this Go-only phase.
+// UnsupportedSources identifies source languages without an implemented analyzer.
 func UnsupportedSources(files []string) []string {
 	var unsupported []string
 	for _, file := range files {
 		switch strings.ToLower(path.Ext(file)) {
-		case ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
+		case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
 			".rs", ".java", ".rb", ".c", ".cpp", ".cs", ".php", ".swift", ".kt":
 			unsupported = append(unsupported, file)
 		}
 	}
 	return unsupported
+}
+
+func PythonFiles(files []string) []string {
+	var selected []string
+	for _, file := range files {
+		if strings.HasSuffix(file, ".py") {
+			selected = append(selected, file)
+		}
+	}
+	return selected
 }

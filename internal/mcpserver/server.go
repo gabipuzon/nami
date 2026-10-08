@@ -70,7 +70,7 @@ func New(snapshot storage.Snapshot) (*mcp.Server, error) {
 	})
 	addTool(server, "nami_search_nodes", "Find saved nodes by case-insensitive substring in name, path, or ID. Ordered by name then ID; default limit 20, maximum 100.", inputSchema(map[string]any{
 		"query": stringProperty("Substring to match; an empty string returns the first limited results."),
-		"kinds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"MODULE", "PACKAGE", "FILE", "FUNCTION", "METHOD", "STRUCT", "INTERFACE", "TYPE", "VARIABLE", "CONSTANT"}}},
+		"kinds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"MODULE", "PACKAGE", "FILE", "FUNCTION", "CLASS", "METHOD", "STRUCT", "INTERFACE", "TYPE", "VARIABLE", "CONSTANT"}}},
 		"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": query.MaxSearchLimit},
 	}, "query"), s.search)
 	addTool(server, "nami_inspect_node", "Inspect a saved node, parent, direct children, and canonical incoming/outgoing edges. Edge kinds retain their stored meaning.", inputSchema(map[string]any{"node_id": stringProperty("Exact saved node ID.")}, "node_id"), s.inspect)

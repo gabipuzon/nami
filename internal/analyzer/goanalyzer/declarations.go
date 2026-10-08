@@ -20,7 +20,7 @@ func declarationFragment(file *ast.File, rel string) (graph.Fragment, int) {
 			return
 		}
 		id := prefix + ":" + rel + "#" + identity
-		fragment.Nodes = append(fragment.Nodes, graph.Node{ID: id, Kind: kind, Path: rel, Name: name})
+		fragment.Nodes = append(fragment.Nodes, graph.Node{Language: "go", ID: id, Kind: kind, Path: rel, Name: name})
 		fragment.Edges = append(fragment.Edges, graph.Edge{Kind: graph.Contains, From: fileID, To: id})
 		// Each emitted exported identifier is one source declaration in this view.
 		if ast.IsExported(name) || (kind == graph.Method && ast.IsExported(name[strings.LastIndex(name, ".")+1:])) {

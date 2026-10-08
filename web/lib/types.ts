@@ -1,5 +1,5 @@
 export const declarationKinds = [
-  "FUNCTION", "METHOD", "STRUCT", "INTERFACE", "TYPE", "VARIABLE", "CONSTANT",
+  "FUNCTION", "CLASS", "METHOD", "STRUCT", "INTERFACE", "TYPE", "VARIABLE", "CONSTANT",
 ] as const;
 
 export type DeclarationKind = typeof declarationKinds[number];
@@ -11,6 +11,7 @@ export interface GraphNode {
   kind: NodeKind;
   path: string;
   name: string;
+  language?: "go" | "python";
   import_count?: number;
   export_count?: number;
 }

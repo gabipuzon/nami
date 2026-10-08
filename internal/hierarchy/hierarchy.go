@@ -56,7 +56,7 @@ func New(g graph.Graph) (*Hierarchy, error) {
 	for childID, parentID := range h.parents {
 		parent, child := h.nodes[parentID], h.nodes[childID]
 		valid := parent.Kind == graph.Module && child.Kind == graph.Package ||
-			parent.Kind == graph.Package && child.Kind == graph.File ||
+			parent.Kind == graph.Package && (child.Kind == graph.File || child.Kind == graph.Package) ||
 			parent.Kind == graph.File && graph.IsDeclaration(child.Kind)
 		if !valid {
 			return nil, fmt.Errorf("invalid containment %s %q -> %s %q", parent.Kind, parentID, child.Kind, childID)

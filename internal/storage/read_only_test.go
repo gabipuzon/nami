@@ -65,7 +65,7 @@ func TestReadOnlyStoreDoesNotMigrate(t *testing.T) {
 		store.Close()
 		t.Fatal(err)
 	}
-	for _, statement := range []string{"ALTER TABLE nodes DROP COLUMN import_count", "ALTER TABLE nodes DROP COLUMN export_count", "PRAGMA user_version = 1"} {
+	for _, statement := range []string{"ALTER TABLE nodes DROP COLUMN language", "ALTER TABLE nodes DROP COLUMN import_count", "ALTER TABLE nodes DROP COLUMN export_count", "PRAGMA user_version = 1"} {
 		if _, err := store.db.Exec(statement); err != nil {
 			store.Close()
 			t.Fatal(err)
@@ -85,7 +85,7 @@ func TestReadOnlyStoreDoesNotMigrate(t *testing.T) {
 	}
 	snapshot, loadErr := ro.Load(summary.ID)
 	closeErr := ro.Close()
-	if loadErr != nil || closeErr != nil || len(snapshot.Result.Graph.Nodes) != 1 || snapshot.Result.Graph.Nodes[0].HasSourceCounts {
+	if loadErr != nil || closeErr != nil || len(snapshot.Result.Graph.Nodes) != 1 || (snapshot.Result.Graph.Nodes[0].HasImportCount || snapshot.Result.Graph.Nodes[0].HasExportCount) {
 		t.Fatalf("legacy snapshot: %+v; load: %v; close: %v", snapshot, loadErr, closeErr)
 	}
 	after, err := os.ReadFile(path)

@@ -55,7 +55,7 @@ func TestSnapshotRoundTripAndImmutability(t *testing.T) {
 		t.Fatalf("round trip changed snapshot: %+v", loaded)
 	}
 	for _, node := range loaded.Result.Graph.Nodes {
-		if node.Kind == graph.File && (node.ImportCount != 2 || node.ExportCount != 0 || !node.HasSourceCounts) {
+		if node.Kind == graph.File && (node.ImportCount != 2 || node.ExportCount != 0 || (!node.HasImportCount || !node.HasExportCount)) {
 			t.Fatalf("source counts did not round trip: %+v", node)
 		}
 	}
@@ -133,7 +133,7 @@ func TestUnsupportedSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec("PRAGMA user_version = 3"); err != nil {
+	if _, err := store.db.Exec("PRAGMA user_version = 4"); err != nil {
 		t.Fatal(err)
 	}
 	store.Close()
@@ -156,6 +156,7 @@ func TestVersionOneStoreMigrationPreservesUnknownCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`ALTER TABLE nodes DROP COLUMN language`,
 		`ALTER TABLE nodes DROP COLUMN import_count`,
 		`ALTER TABLE nodes DROP COLUMN export_count`,
 		`PRAGMA user_version = 1`,
@@ -176,7 +177,7 @@ func TestVersionOneStoreMigrationPreservesUnknownCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Result.Graph.Nodes) != 1 || loaded.Result.Graph.Nodes[0].HasSourceCounts {
+	if len(loaded.Result.Graph.Nodes) != 1 || (loaded.Result.Graph.Nodes[0].HasImportCount || loaded.Result.Graph.Nodes[0].HasExportCount) {
 		t.Fatalf("old counts should be unavailable: %+v", loaded.Result.Graph.Nodes)
 	}
 }
@@ -305,5 +306,71 @@ func TestNewConnectionEnforcesForeignKeys(t *testing.T) {
 	var enabled int
 	if err := store.db.QueryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil || enabled != 1 {
 		t.Fatalf("new connection foreign_keys = %d, %v", enabled, err)
+	}
+}
+
+func TestLanguageAndIndependentCountsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result := analysis.Result{Coverage: analysis.Coverage{Status: "complete"}, Graph: graph.Graph{Nodes: []graph.Node{{ID: "file:module.py", Kind: graph.File, Language: "python", Path: "module.py", Name: "module.py", ImportCount: 2, HasImportCount: true}}}}
+	summary, err := store.Save(root, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(summary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Graph, loaded.Result.Graph) {
+		t.Fatalf("round trip: %+v", loaded.Result.Graph)
+	}
+	var imports int
+	var exports any
+	if err := store.db.QueryRow("SELECT import_count,export_count FROM nodes WHERE scan_id = ?", summary.ID).Scan(&imports, &exports); err != nil {
+		t.Fatal(err)
+	}
+	if imports != 2 || exports != nil {
+		t.Fatalf("unknown export persisted as %v", exports)
+	}
+}
+
+func TestVersionTwoLanguageMigrationAndReadOnly(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := analysis.Result{Coverage: analysis.Coverage{Status: "complete"}, Graph: graph.Graph{Nodes: []graph.Node{{ID: "file:old.go", Kind: graph.File, Name: "old.go", Path: "old.go", ImportCount: 1, HasImportCount: true, HasExportCount: true}}}}
+	summary, err := store.Save(root, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{"ALTER TABLE nodes DROP COLUMN language", "PRAGMA user_version = 2"} {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, open := range []func(string) (*Store, error){OpenReadOnly, Open} {
+		old, err := open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := old.Load(summary.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(loaded.Result.Graph, result.Graph) {
+			t.Fatalf("legacy snapshot changed: %+v", loaded.Result.Graph)
+		}
+		if err := old.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

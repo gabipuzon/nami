@@ -15,3 +15,13 @@ func TestUnsupportedSources(t *testing.T) {
 		t.Fatalf("unsupported files = %q, want %q", got, want)
 	}
 }
+
+func TestPythonSourcesAreSupported(t *testing.T) {
+	files := []string{"main.go", "users/service.py", "notes.txt", "other.ts"}
+	if got := PythonFiles(files); !reflect.DeepEqual(got, []string{"users/service.py"}) {
+		t.Fatalf("Python candidates: %v", got)
+	}
+	if got := UnsupportedSources(files); !reflect.DeepEqual(got, []string{"other.ts"}) {
+		t.Fatalf("unsupported: %v", got)
+	}
+}

@@ -19,6 +19,7 @@ interface ExplorerProps {
 export function Explorer(props: ExplorerProps) {
   const { canonicalGraph, visibleGraph, selectedNodeID, search, visibleDeclarationKinds, onSearch, onSelectNode, onToggle, onToggleKind } = props;
   const packages = visibleGraph.nodes.filter((node) => node.kind === "PACKAGE");
+  const modules = visibleGraph.nodes.filter((node) => node.kind === "FILE" && !node.parentId);
   const visibleByID = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
   const children = new Map<string, GraphNode[]>();
   for (const node of visibleGraph.nodes) {
@@ -67,6 +68,7 @@ export function Explorer(props: ExplorerProps) {
       <div className="section-heading tree-heading">Packages <span>{packages.length}</span></div>
       <div className="tree-list">{packages.map((pkg) => renderEntry(pkg, 0))}</div>
 
+      {modules.length > 0 && <><div className="section-heading tree-heading">Modules <span>{modules.length}</span></div><div className="tree-list">{modules.map((file) => renderEntry(file, 0))}</div></>}
       <div className="explorer-secondary">
         <div className="section-heading">Visible levels</div>
         <div className="count-row"><span>Packages</span><strong>{counts.packages}</strong></div>

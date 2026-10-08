@@ -1,1 +1,1 @@
-# Unsupported source should not enter the Go graph.
+# Python source remains queryable alongside the Go fixture.

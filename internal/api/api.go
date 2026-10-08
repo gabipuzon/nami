@@ -19,6 +19,7 @@ type nodeJSON struct {
 	Kind        graph.NodeKind `json:"kind"`
 	Path        string         `json:"path"`
 	Name        string         `json:"name"`
+	Language    string         `json:"language,omitempty"`
 	ImportCount *int           `json:"import_count,omitempty"`
 	ExportCount *int           `json:"export_count,omitempty"`
 }
@@ -285,8 +286,11 @@ func (h *handler) requireNode(w http.ResponseWriter, id string, kind graph.NodeK
 
 func convertNode(node graph.Node) nodeJSON {
 	result := nodeJSON{ID: node.ID, Kind: node.Kind, Path: node.Path, Name: node.Name}
-	if node.Kind == graph.File && node.HasSourceCounts {
+	result.Language = node.Language
+	if node.Kind == graph.File && node.HasImportCount {
 		result.ImportCount = &node.ImportCount
+	}
+	if node.Kind == graph.File && node.HasExportCount {
 		result.ExportCount = &node.ExportCount
 	}
 	return result

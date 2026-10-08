@@ -83,7 +83,7 @@ export function Details(props: DetailsProps) {
   return <aside className="details-panel" aria-label="Details">
     <div className="panel-heading"><h2>Inspector</h2><span>{selectedNode.kind.toLowerCase()}</span></div>
     <div className="details-scroll">
-      <div className="detail-intro"><h3>{selectedNode.name}</h3><span className="kind-label">{selectedNode.kind.toLowerCase()}</span><code className="detail-path">{selectedNode.path}</code></div>
+      <div className="detail-intro"><h3>{selectedNode.name}</h3><span className="kind-label">{selectedNode.kind.toLowerCase()}</span><code className="detail-path">{selectedNode.path}</code>{selectedNode.language && <span className="kind-label">{selectedNode.language}</span>}</div>
       {isPackage && <div className="detail-summary"><span>{files.length} files</span><span>{outgoing.length} dependencies</span><span>{incoming.length} dependents</span></div>}
 
       {isPackage && <>

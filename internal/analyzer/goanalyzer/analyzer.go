@@ -99,7 +99,7 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 	result := Result{Fragment: graph.Fragment{}}
 	for _, mod := range modules {
 		result.Fragment.Nodes = append(result.Fragment.Nodes, graph.Node{
-			ID: moduleID(mod), Kind: graph.Module, Path: mod.dir, Name: mod.path,
+			Language: "go", ID: moduleID(mod), Kind: graph.Module, Path: mod.dir, Name: mod.path,
 		})
 	}
 	packages := make(map[string]graph.Node)
@@ -128,11 +128,11 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 		dir := path.Dir(rel)
 		packageID := "package:" + dir + "#" + file.Name.Name
 		if _, ok := packages[packageID]; !ok {
-			packages[packageID] = graph.Node{ID: packageID, Kind: graph.Package, Path: dir, Name: file.Name.Name}
+			packages[packageID] = graph.Node{Language: "go", ID: packageID, Kind: graph.Package, Path: dir, Name: file.Name.Name}
 		}
 		fileID := "file:" + rel
 		declarations, exportCount := declarationFragment(file, rel)
-		result.Fragment.Nodes = append(result.Fragment.Nodes, graph.Node{ID: fileID, Kind: graph.File, Path: rel, Name: path.Base(rel), ImportCount: len(file.Imports), ExportCount: exportCount, HasSourceCounts: true})
+		result.Fragment.Nodes = append(result.Fragment.Nodes, graph.Node{Language: "go", ID: fileID, Kind: graph.File, Path: rel, Name: path.Base(rel), ImportCount: len(file.Imports), ExportCount: exportCount, HasImportCount: true, HasExportCount: true})
 		result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Contains, From: packageID, To: fileID})
 		result.Fragment.Nodes = append(result.Fragment.Nodes, declarations.Nodes...)
 		result.Fragment.Edges = append(result.Fragment.Edges, declarations.Edges...)

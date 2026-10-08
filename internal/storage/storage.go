@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 type Store struct {
 	db      *sql.DB
@@ -117,17 +117,18 @@ func (s *Store) initialize() error {
 	if version == schemaVersion {
 		return nil
 	}
-	if version == 1 {
+	if version == 1 || version == 2 {
 		tx, err := s.db.Begin()
 		if err != nil {
 			return fmt.Errorf("migrate store: %w", err)
 		}
 		defer tx.Rollback()
-		for _, statement := range []string{
-			`ALTER TABLE nodes ADD COLUMN import_count INTEGER`,
-			`ALTER TABLE nodes ADD COLUMN export_count INTEGER`,
-			`PRAGMA user_version = 2`,
-		} {
+		statements := []string{}
+		if version == 1 {
+			statements = append(statements, `ALTER TABLE nodes ADD COLUMN import_count INTEGER`, `ALTER TABLE nodes ADD COLUMN export_count INTEGER`)
+		}
+		statements = append(statements, `ALTER TABLE nodes ADD COLUMN language TEXT`, `PRAGMA user_version = 3`)
+		for _, statement := range statements {
 			if _, err := tx.Exec(statement); err != nil {
 				return fmt.Errorf("migrate store schema: %w", err)
 			}
@@ -153,7 +154,7 @@ func (s *Store) initialize() error {
 		)`,
 		`CREATE TABLE nodes (
 			scan_id TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL,
-			import_count INTEGER, export_count INTEGER,
+			import_count INTEGER, export_count INTEGER, language TEXT,
 			PRIMARY KEY (scan_id, id), FOREIGN KEY (scan_id) REFERENCES snapshots(id)
 		)`,
 		`CREATE TABLE edges (
@@ -167,7 +168,7 @@ func (s *Store) initialize() error {
 			path TEXT NOT NULL, import_path TEXT NOT NULL, reason TEXT NOT NULL,
 			PRIMARY KEY (scan_id, ordinal), FOREIGN KEY (scan_id) REFERENCES snapshots(id)
 		)`,
-		`PRAGMA user_version = 2`,
+		`PRAGMA user_version = 3`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize store schema: %w", err)
@@ -207,10 +208,13 @@ func (s *Store) Save(root string, result analysis.Result) (Summary, error) {
 	}
 	for _, node := range result.Graph.Nodes {
 		var imports, exports any
-		if node.Kind == graph.File && node.HasSourceCounts {
-			imports, exports = node.ImportCount, node.ExportCount
+		if node.Kind == graph.File && node.HasImportCount {
+			imports = node.ImportCount
 		}
-		if _, err := tx.Exec(`INSERT INTO nodes VALUES (?,?,?,?,?,?,?)`, summary.ID, node.ID, node.Kind, node.Path, node.Name, imports, exports); err != nil {
+		if node.Kind == graph.File && node.HasExportCount {
+			exports = node.ExportCount
+		}
+		if _, err := tx.Exec(`INSERT INTO nodes (scan_id,id,kind,path,name,import_count,export_count,language) VALUES (?,?,?,?,?,?,?,?)`, summary.ID, node.ID, node.Kind, node.Path, node.Name, imports, exports, node.Language); err != nil {
 			return Summary{}, fmt.Errorf("save graph node %q: %w", node.ID, err)
 		}
 	}
@@ -283,19 +287,28 @@ func (s *Store) Load(id string) (Snapshot, error) {
 		// database or implying that missing counts are zero.
 		counts = "NULL, NULL"
 	}
-	nodes, err := s.db.Query(`SELECT id, kind, path, name, `+counts+` FROM nodes WHERE scan_id = ? ORDER BY kind, id`, id)
+	language := "language"
+	if s.version < 3 {
+		language = "NULL"
+	}
+	nodes, err := s.db.Query(`SELECT id, kind, path, name, `+language+`, `+counts+` FROM nodes WHERE scan_id = ? ORDER BY kind, id`, id)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load graph nodes: %w", err)
 	}
 	for nodes.Next() {
 		var node graph.Node
 		var imports, exports sql.NullInt64
-		if err := nodes.Scan(&node.ID, &node.Kind, &node.Path, &node.Name, &imports, &exports); err != nil {
+		var language sql.NullString
+		if err := nodes.Scan(&node.ID, &node.Kind, &node.Path, &node.Name, &language, &imports, &exports); err != nil {
 			nodes.Close()
 			return Snapshot{}, fmt.Errorf("read graph node: %w", err)
 		}
-		if imports.Valid && exports.Valid {
-			node.ImportCount, node.ExportCount, node.HasSourceCounts = int(imports.Int64), int(exports.Int64), true
+		node.Language = language.String
+		if imports.Valid {
+			node.ImportCount, node.HasImportCount = int(imports.Int64), true
+		}
+		if exports.Valid {
+			node.ExportCount, node.HasExportCount = int(exports.Int64), true
 		}
 		snap.Result.Graph.Nodes = append(snap.Result.Graph.Nodes, node)
 	}
