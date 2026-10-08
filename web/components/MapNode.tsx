@@ -1,8 +1,11 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { recordPerformance, setPerformanceCount } from "../lib/performance";
+
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useId, useRef, useState } from "react";
 import { Handle, Position, useUpdateNodeInternals, type Node, type NodeProps } from "@xyflow/react";
 import { sourceStatsTitle, type NodePresentation } from "../lib/languagePresentation";
+import { ABOVE, BELOW, rowWindow, connectedHandles, type RowWindow } from "../lib/bundles";
 import type { VisibleNode } from "../lib/presentation";
 
 export interface PresentedNode extends VisibleNode {
@@ -26,6 +29,7 @@ export type MapFlowNode = Node<{
   dimmed: boolean;
   importingFiles: ReadonlySet<string>;
   supplyingFiles: ReadonlySet<string>;
+  onWindow: (id: string, window: RowWindow) => void;
   onToggle: (id: string) => void;
   onSelect: (id: string) => void;
 }, "map">;
@@ -56,11 +60,12 @@ function firstRowStartingAtOrAfter(offsets: number[], position: number): number 
 }
 
 export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode>) {
-  const { item, files, selectedID, selectedSupplierID, selectedImporterID, impactDistance, impactTarget, dimmed, importingFiles, supplyingFiles, presentation, onToggle, onSelect } = data;
+  recordPerformance("render.MapNode");
+  const { item, files, selectedID, selectedSupplierID, selectedImporterID, impactDistance, impactTarget, dimmed, importingFiles, supplyingFiles, presentation, onToggle, onSelect, onWindow } = data;
   const listRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
-  const [range, setRange] = useState({ first: 0, last: Math.min(files.length, 10), renderFirst: 0, renderLast: Math.min(files.length, 12) });
+  const [range, setRange] = useState({ first: 0, last: Math.min(files.length, 10), handleFirst: 0, renderFirst: 0, renderLast: Math.min(files.length, 12) });
   const [anchors, setAnchors] = useState<Record<string, number>>({});
   const rowLayout = useMemo(() => {
     const offsets = [0];
@@ -77,11 +82,23 @@ export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode
     return { offsets, locations };
   }, [files]);
   const connectedFiles = useMemo(() => files.map(({ file }, index) => ({ id: file.id, top: rowLayout.offsets[index] })).filter(({ id: fileID }) => importingFiles.has(fileID) || supplyingFiles.has(fileID)), [files, rowLayout, importingFiles, supplyingFiles]);
+  const window = useMemo(() => rowWindow(files.map(({file}) => file.id), range.handleFirst, range.last), [files, range.handleFirst, range.last]);
+  useEffect(() => { if (item.expanded) onWindow(id, window); }, [id, item.expanded, window, onWindow]);
+  const targetHandles = useMemo(() => connectedHandles(window, importingFiles), [window, importingFiles]);
+  const sourceHandles = useMemo(() => connectedHandles(window, supplyingFiles), [window, supplyingFiles]);
+  const instanceID = useId();
+  useEffect(() => {
+    setPerformanceCount(`handles.${instanceID}.${id}`, 2 + (item.expanded ? targetHandles.length + sourceHandles.length : 0));
+    return () => setPerformanceCount(`handles.${instanceID}.${id}`, undefined);
+  }, [instanceID, id, item.expanded, targetHandles.length, sourceHandles.length]);
   const updateNodeInternals = useUpdateNodeInternals();
   const updateGeometry = useCallback(() => {
+    recordPerformance("node.geometry");
+    if (!item.expanded) return;
     const list = listRef.current;
     const card = cardRef.current;
     if (!list || !card) return;
+    recordPerformance("node.geometry.rectReads", 0);
     const listRect = list.getBoundingClientRect();
     const cardRect = card.getBoundingClientRect();
     const scale = cardRect.height / card.offsetHeight;
@@ -89,18 +106,21 @@ export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode
     const { offsets } = rowLayout;
     const first = firstRowEndingAfter(offsets, list.scrollTop);
     const last = firstRowStartingAtOrAfter(offsets, list.scrollTop + list.clientHeight);
+    const handleFirst = Math.min(files.length, first + (offsets[first] + FILE_ROW_HEIGHT <= list.scrollTop ? 1 : 0));
     const renderFirst = Math.max(0, first - 2);
     const renderLast = Math.min(files.length, last + 2);
-    setRange((current) => current.first === first && current.last === last && current.renderFirst === renderFirst && current.renderLast === renderLast ? current : { first, last, renderFirst, renderLast });
+    setRange((current) => current.first === first && current.handleFirst === handleFirst && current.last === last && current.renderFirst === renderFirst && current.renderLast === renderLast ? current : { first, last, handleFirst, renderFirst, renderLast });
     const next: Record<string, number> = {};
     const listTop = (listRect.top - cardRect.top) / scale;
-    for (const file of connectedFiles) {
+    next[ABOVE] = listTop + 4;
+    next[BELOW] = listTop + list.clientHeight - 4;
+    for (const file of connectedFiles.filter(file => window.visible.includes(file.id))) {
       next[file.id] = Math.max(listTop + 4, Math.min(listTop + list.clientHeight - 4, listTop + file.top + 15 - list.scrollTop));
     }
-    setAnchors((current) => connectedFiles.every(({ id: fileID }) => current[fileID] === next[fileID]) && Object.keys(current).length === connectedFiles.length ? current : next);
-  }, [files.length, rowLayout, connectedFiles]);
+    setAnchors((current) => Object.keys(next).every(fileID => current[fileID] === next[fileID]) && Object.keys(current).length === Object.keys(next).length ? current : next);
+  }, [item.expanded, files.length, rowLayout, connectedFiles, window]);
   useLayoutEffect(() => { updateGeometry(); }, [updateGeometry, item.expanded]);
-  useLayoutEffect(() => { if (item.expanded) updateNodeInternals(id); }, [anchors, id, item.expanded, updateNodeInternals]);
+  useLayoutEffect(() => { if (item.expanded) { recordPerformance("node.internals"); updateNodeInternals(id); } }, [anchors, targetHandles, sourceHandles, id, item.expanded, updateNodeInternals]);
   useEffect(() => () => { if (frameRef.current !== null) cancelAnimationFrame(frameRef.current); }, []);
   const onListScroll = () => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
@@ -140,8 +160,8 @@ export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode
       </div>
       <div className="package-list-foot">{files.length ? `${range.first + 1}–${range.last} of ${files.length} ${presentation.rowGroupLabel.toLowerCase()}` : `No ${presentation.rowGroupLabel.toLowerCase()}`}</div>
     </>}
-    {item.expanded && connectedFiles.filter(({ id: fileID }) => importingFiles.has(fileID)).map(({ id: fileID }) => <Handle key={`in:${fileID}`} id={fileID} type="target" position={Position.Left} isConnectable={false} className="map-handle" style={{ top: anchors[fileID] ?? 72, left: 3 }} />)}
-    {item.expanded && connectedFiles.filter(({ id: fileID }) => supplyingFiles.has(fileID)).map(({ id: fileID }) => <Handle key={`out:${fileID}`} id={fileID} type="source" position={Position.Right} isConnectable={false} className="map-handle" style={{ top: anchors[fileID] ?? 72, right: 3 }} />)}
+    {item.expanded && targetHandles.map((fileID) => <Handle key={`in:${fileID}`} id={fileID} type="target" position={Position.Left} isConnectable={false} className="map-handle" style={{ top: anchors[fileID] ?? 72, left: 3 }} />)}
+    {item.expanded && sourceHandles.map((fileID) => <Handle key={`out:${fileID}`} id={fileID} type="source" position={Position.Right} isConnectable={false} className="map-handle" style={{ top: anchors[fileID] ?? 72, right: 3 }} />)}
     <Handle type="source" position={Position.Right} isConnectable={false} className="map-handle" />
   </div>;
 });

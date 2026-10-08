@@ -12,7 +12,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: make check build
+      - run: make check
+      - run: go build ./cmd/nami
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -28,4 +29,11 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run lint
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - run: npm run build
+      - run: go test -tags webui ./...
+        working-directory: .
+      - run: go build -tags webui -o bin/nami ./cmd/nami
+        working-directory: .

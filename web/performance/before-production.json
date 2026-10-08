@@ -1,0 +1,325 @@
+{
+  "url": "http://localhost:3001/?perf=1",
+  "initial": {
+    "metrics": {
+      "render.MapApp": {
+        "calls": 5,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "buildVisibleGraph": {
+        "calls": 2,
+        "totalMs": 148,
+        "maxMs": 102
+      },
+      "packageSourceCounts": {
+        "calls": 1,
+        "totalMs": 5,
+        "maxMs": 5
+      },
+      "buildNodePresentations": {
+        "calls": 5,
+        "totalMs": 58,
+        "maxMs": 16
+      },
+      "buildExportUseIndex": {
+        "calls": 1,
+        "totalMs": 9,
+        "maxMs": 9
+      },
+      "fileDependencyRoles": {
+        "calls": 1,
+        "totalMs": 5,
+        "maxMs": 5
+      },
+      "importCardLines": {
+        "calls": 76,
+        "totalMs": 86,
+        "maxMs": 54
+      },
+      "layoutVisibleGraph": {
+        "calls": 1,
+        "totalMs": 94,
+        "maxMs": 94
+      },
+      "render.Explorer": {
+        "calls": 2,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "buildExplorerTree": {
+        "calls": 2,
+        "totalMs": 15,
+        "maxMs": 10
+      },
+      "searchNodes": {
+        "calls": 2,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "render.GraphCanvas": {
+        "calls": 4,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "render.Details": {
+        "calls": 2,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "flow.sync": {
+        "calls": 1,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "render.MapNode": {
+        "calls": 36,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "node.geometry": {
+        "calls": 18,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "flow.changes": {
+        "calls": 1,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "flow.change.dimensions": {
+        "calls": 18,
+        "totalMs": 0,
+        "maxMs": 0
+      },
+      "render.DependencyEdge": {
+        "calls": 3294,
+        "totalMs": 0,
+        "maxMs": 0
+      }
+    },
+    "nodes": 18,
+    "edges": 3294,
+    "dom": 26779,
+    "stats": "Visible levelsPackages17Files1046Declarations9459Declaration kindsfunctionclassmethodstructinterfacetypevariableconstant"
+  },
+  "samples": {
+    "collapsedIdle": {
+      "app": {},
+      "browser": {}
+    },
+    "collapsedClicks": {
+      "elapsedMs": 9609,
+      "metrics": {
+        "render.MapApp": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.Explorer": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "buildExplorerTree": {
+          "calls": 6,
+          "totalMs": 27,
+          "maxMs": 8
+        },
+        "buildNodePresentations": {
+          "calls": 12,
+          "totalMs": 144,
+          "maxMs": 30
+        },
+        "searchNodes": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.GraphCanvas": {
+          "calls": 16,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.DependencyEdge": {
+          "calls": 52704,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.Details": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "flow.sync": {
+          "calls": 5,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.MapNode": {
+          "calls": 180,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "node.geometry": {
+          "calls": 85,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "flow.changes": {
+          "calls": 5,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "flow.change.dimensions": {
+          "calls": 90,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      },
+      "browser": {
+        "rafRequests": 11,
+        "domMutations": 37452,
+        "rafCallbacks": 8,
+        "rectReads": 270
+      },
+      "warnings": 0,
+      "dom": 26825
+    },
+    "collapsedPanZoom": {
+      "metrics": {},
+      "browser": {
+        "rectReads": 32,
+        "rafRequests": 17,
+        "rafCallbacks": 17,
+        "domMutations": 152
+      },
+      "frames": [
+        -0.2400000000016007,
+        0.2000000000007276,
+        16.080000000001746,
+        83.43999999999869,
+        33.18000000000029,
+        83.38000000000102,
+        33.099999999998545,
+        17.06000000000131,
+        333.41999999999825,
+        166.72000000000116,
+        216.65999999999985,
+        383.0600000000013,
+        233.5,
+        232.9399999999987,
+        284.1399999999994,
+        265.8199999999997,
+        300.58000000000175
+      ]
+    },
+    "expandedIdle": {
+      "app": {},
+      "browser": {}
+    },
+    "expandedClicks": {
+      "elapsedMs": 14206,
+      "metrics": {
+        "render.MapApp": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.Explorer": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "buildExplorerTree": {
+          "calls": 6,
+          "totalMs": 39,
+          "maxMs": 15
+        },
+        "buildNodePresentations": {
+          "calls": 12,
+          "totalMs": 177,
+          "maxMs": 35
+        },
+        "searchNodes": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.GraphCanvas": {
+          "calls": 16,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.DependencyEdge": {
+          "calls": 58160,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.Details": {
+          "calls": 6,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "flow.sync": {
+          "calls": 5,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "render.MapNode": {
+          "calls": 180,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "flow.changes": {
+          "calls": 5,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "flow.change.dimensions": {
+          "calls": 90,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "node.geometry": {
+          "calls": 1,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "node.geometry.rectReads": {
+          "calls": 1,
+          "totalMs": 0,
+          "maxMs": 0
+        }
+      },
+      "browser": {
+        "rafRequests": 11,
+        "domMutations": 41299,
+        "rafCallbacks": 7,
+        "rectReads": 10542
+      },
+      "warnings": 0,
+      "dom": 38847
+    },
+    "expandedPanZoom": {
+      "metrics": {},
+      "browser": {
+        "rectReads": 32,
+        "rafRequests": 9,
+        "domMutations": 152,
+        "rafCallbacks": 9
+      },
+      "frames": [
+        583.2200000000012,
+        83.44000000000233,
+        16.080000000001746,
+        17.15999999998894,
+        133.34000000001106,
+        449.61999999999534,
+        500.27999999999884,
+        400.320000000007,
+        382.7199999999866
+      ]
+    }
+  }
+}

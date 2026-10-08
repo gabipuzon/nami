@@ -56,6 +56,7 @@ export interface Scan {
   status: "complete" | "completed_with_gaps";
   coverage: Coverage;
   issues: Issue[];
+  exclusions?: { path: string; reason: string }[];
 }
 
 export interface Evidence {
@@ -64,6 +65,7 @@ export interface Evidence {
 }
 
 export interface PackageProjection {
+  relationship_totals?: Record<string, number>;
   graph: Graph;
   evidence: Evidence[];
 }
@@ -79,6 +81,7 @@ export interface Impact {
   graph: Graph;
   coverage_status: Scan["status"];
   incomplete: boolean;
+  excluded_paths?: number;
 }
 
 export interface ApiError {
@@ -89,7 +92,64 @@ export interface ApiError {
 }
 
 export interface LoadedData {
+  childCounts?: Record<string, number>;
+  fileCounts?: Record<string, number>;
+  counts?: { packages: number; files: number; declarations: number };
   scan: Scan;
   canonicalGraph: Graph;
   packageProjection: PackageProjection;
 }
+
+export interface NeighborPage { nodes: GraphNode[]; total: number; offset: number }
+export interface Neighborhood {
+  context_graph?: Graph;
+  focal: GraphNode;
+  scope: "canonical" | "package";
+  graph: Graph;
+  dependencies: NeighborPage;
+  dependents: NeighborPage;
+  evidence: Evidence[];
+  page_size: number;
+  snapshot_id: string;
+  coverage_status: Scan["status"];
+  incomplete: boolean;
+  excluded_paths?: number;
+}
+
+export interface SourceOccurrence {
+  edge: GraphEdge;
+  path: string;
+  line: number;
+  column: number;
+  end_line: number;
+  end_column: number;
+  snippet: string;
+  truncated: boolean;
+  hash: string;
+}
+export interface SourceEvidencePage {
+  items: SourceOccurrence[];
+  total: number;
+  offset: number;
+  page_size: number;
+  recorded: boolean;
+}
+export interface SourceStatus { status: "unchanged" | "changed" | "missing" | "unreadable" | "not_recorded"; path: string }
+
+export interface GraphDetail {
+  graph: Graph;
+  package_projection: PackageProjection;
+  child_counts: Record<string, number>;
+  file_counts?: Record<string, number>;
+}
+export interface Overview extends GraphDetail { counts: { packages: number; files: number; declarations: number } }
+export interface NodePage { nodes: GraphNode[]; total: number; offset: number }
+export interface ChildrenPage extends GraphDetail, NodePage {}
+export interface Inspection extends GraphDetail {
+  node: GraphNode;
+  parent: string;
+  children: NodePage;
+  dependencies: NodePage;
+  dependents: NodePage;
+}
+export interface RelationshipFacts { items: GraphEdge[]; total: number; offset: number; graph: Graph }

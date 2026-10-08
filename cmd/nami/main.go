@@ -14,7 +14,7 @@ import (
 	"github.com/gabipuzon/nami/internal/storage"
 )
 
-const usage = "nami — local-first codebase navigator\n\nUsage:\n  nami map <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami symbols <directory> <scan-id> <file-node-id>\n  nami impact <directory> <scan-id> <package-node-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami serve <directory> <scan-id>\n  nami mcp <directory> <scan-id>\n  nami [--help]\n"
+const usage = "nami — local-first codebase navigator\n\nUsage:\n  nami map [--no-serve] [--no-open] <directory>\n  nami scans <directory>\n  nami show <directory> <scan-id>\n  nami packages <directory> <scan-id>\n  nami symbols <directory> <scan-id> <file-node-id>\n  nami impact <directory> <scan-id> <package-node-id>\n  nami dependencies <directory> <scan-id> <node-id>\n  nami dependents <directory> <scan-id> <node-id>\n  nami path <directory> <scan-id> <from-node-id> <to-node-id>\n  nami serve <directory> <scan-id>\n  nami mcp <directory> <scan-id>\n  nami [--help]\n"
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -27,29 +27,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "serve":
 		return serve(args, stdout, stderr)
 	case "map":
-		if len(args) != 2 {
-			fmt.Fprintln(stderr, "usage: nami map <directory>")
-			return 2
-		}
-		result, err := analysis.Map(args[1])
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		store, err := storage.Open(args[1])
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		scan, err := store.Save(args[1], result)
-		store.Close()
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "SAVED_SCAN id=%s created_at=%s status=%s\n", scan.ID, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
-		printResult(stdout, result)
-		return 0
+		return mapRepository(args, stdout, stderr)
 	case "scans":
 		if len(args) != 2 {
 			fmt.Fprintln(stderr, "usage: nami scans <directory>")
@@ -86,8 +64,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "STORED_SCAN id=%s root=%s created_at=%s status=%s\n", scan.ID, scan.Root, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
 		printResult(stdout, scan.Result)
+		fmt.Fprintf(stdout, "STORED_SCAN id=%s root=%s created_at=%s status=%s\n", scan.ID, scan.Root, scan.CreatedAt.Format(time.RFC3339Nano), scan.Status)
 		return 0
 	case "packages":
 		if len(args) != 3 {
@@ -211,6 +189,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "AFFECTED distance=%d %s\n", affected.Distance, affected.ID)
 		}
 		fmt.Fprintf(stdout, "IMPACT_COVERAGE status=%s\n", scan.Result.Coverage.Status)
+		if len(scan.Result.Exclusions) > 0 {
+			fmt.Fprintf(stdout, "IMPACT_SCOPE excluded_paths=%d (impact covers included scan scope)\n", len(scan.Result.Exclusions))
+		}
 		if scan.Result.Coverage.Status != "complete" {
 			fmt.Fprintln(stdout, "IMPACT_WARNING stored scan has analysis gaps; impact may be incomplete")
 		}
@@ -281,12 +262,9 @@ func printResult(stdout io.Writer, result analysis.Result) {
 	for _, edge := range result.Graph.Edges {
 		fmt.Fprintf(stdout, "%s %s -> %s\n", edge.Kind, edge.From, edge.To)
 	}
-	coverage := result.Coverage
-	fmt.Fprintf(stdout, "COVERAGE status=%s\n", coverage.Status)
-	fmt.Fprintf(stdout, "COVERAGE files_discovered=%d supported_source_files=%d files_analyzed=%d files_skipped=%d files_failed=%d\n",
-		coverage.FilesDiscovered, coverage.SupportedSourceFiles, coverage.FilesAnalyzed, coverage.FilesSkipped, coverage.FilesFailed)
-	fmt.Fprintf(stdout, "COVERAGE imports_discovered=%d internal_imports_resolved=%d standard_library_imports=%d external_imports=%d unresolved_imports=%d cgo_imports=%d unclassified_imports=%d\n",
-		coverage.ImportsDiscovered, coverage.InternalResolved, coverage.StandardLibrary, coverage.External, coverage.Unresolved, coverage.Cgo, coverage.Unclassified)
+	for _, excluded := range result.Exclusions {
+		fmt.Fprintf(stdout, "EXCLUDED_PATH %s: %s\n", excluded.Path, excluded.Reason)
+	}
 	for _, issue := range result.Issues {
 		if issue.Import == "" {
 			fmt.Fprintf(stdout, "%s %s: %s\n", issue.Kind, issue.Path, issue.Reason)
@@ -294,6 +272,15 @@ func printResult(stdout io.Writer, result analysis.Result) {
 			fmt.Fprintf(stdout, "%s %s %q: %s\n", issue.Kind, issue.Path, issue.Import, issue.Reason)
 		}
 	}
+	coverage := result.Coverage
+	fmt.Fprintf(stdout, "COVERAGE status=%s\n", coverage.Status)
+	if len(result.Exclusions) > 0 {
+		fmt.Fprintf(stdout, "COVERAGE excluded_paths=%d (directories counted once; coverage describes included scan scope)\n", len(result.Exclusions))
+	}
+	fmt.Fprintf(stdout, "COVERAGE files_discovered=%d supported_source_files=%d files_analyzed=%d files_skipped=%d files_failed=%d\n",
+		coverage.FilesDiscovered, coverage.SupportedSourceFiles, coverage.FilesAnalyzed, coverage.FilesSkipped, coverage.FilesFailed)
+	fmt.Fprintf(stdout, "COVERAGE imports_discovered=%d internal_imports_resolved=%d standard_library_imports=%d external_imports=%d unresolved_imports=%d cgo_imports=%d unclassified_imports=%d\n",
+		coverage.ImportsDiscovered, coverage.InternalResolved, coverage.StandardLibrary, coverage.External, coverage.Unresolved, coverage.Cgo, coverage.Unclassified)
 }
 
 func main() {

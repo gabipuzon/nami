@@ -1,3 +1,5 @@
+import { getGraphIndex } from "./graphIndex.ts";
+import { measurePerformance } from "./performance.ts";
 import { declarationKinds, type Graph, type GraphNode } from "./types.ts";
 
 export interface SourceStats {
@@ -59,8 +61,17 @@ export function sourceStatsTitle(stats: SourceStats): string {
   return `${stats.imports ?? "unknown"} imports, ${stats.exports ?? "unknown"} exports`;
 }
 
-export function buildNodePresentations(graph: Graph, counts: ReadonlyMap<string, SourceStats> = new Map()): Map<string, NodePresentation> {
-  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
-  const parent = new Map(graph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, nodes.get(edge.from)]));
-  return new Map(graph.nodes.map((node) => [node.id, presentationFor(node, parent.get(node.id), counts.get(node.id))]));
+const emptyCounts: ReadonlyMap<string, SourceStats> = new Map();
+const presentationCache = new WeakMap<Graph, WeakMap<ReadonlyMap<string, SourceStats>, Map<string, NodePresentation>>>();
+export function buildNodePresentations(graph: Graph, counts: ReadonlyMap<string, SourceStats> = emptyCounts): Map<string, NodePresentation> {
+  const cached = presentationCache.get(graph)?.get(counts);
+  if (cached) return cached;
+  return measurePerformance("buildNodePresentations", () => {
+    const { nodes, parent } = getGraphIndex(graph);
+    const result = new Map(graph.nodes.map(node => [node.id, presentationFor(node, nodes.get(parent.get(node.id) ?? ""), counts.get(node.id))]));
+    let variants = presentationCache.get(graph);
+    if (!variants) { variants = new WeakMap(); presentationCache.set(graph, variants); }
+    variants.set(counts, result);
+    return result;
+  });
 }

@@ -12,4 +12,5 @@ vet:
 	go vet ./...
 
 build:
-	go build -o bin/nami ./cmd/nami
+	cd web && npm run build
+	go build -tags webui -o bin/nami ./cmd/nami

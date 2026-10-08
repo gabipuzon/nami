@@ -22,3 +22,6 @@ coverage.*
 
 # Local planning notes
 /docs/
+
+# Generated bundled frontend
+/internal/webui/assets/

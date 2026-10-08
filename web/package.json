@@ -4,10 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "next build --webpack",
-    "start": "next start",
+    "build": "NAMI_EXPORT=1 next build --webpack && node scripts/bundle.mjs",
     "lint": "eslint .",
-    "test": "node lib/presentation.test.ts"
+    "test": "node lib/presentation.test.ts && node lib/preferences.test.ts && node lib/flowState.test.ts && node lib/graphIndex.test.ts && node lib/navigation.test.ts && node lib/loading.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

@@ -30,7 +30,7 @@ func TestMapRequiresDirectory(t *testing.T) {
 	if code := run([]string{"map"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("run(map) exit code = %d, want 2", code)
 	}
-	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage: nami map <directory>") {
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage: nami map [--no-serve] [--no-open] <directory>") {
 		t.Fatalf("run(map) stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
 }
@@ -63,16 +63,20 @@ func TestMapReportsCoverageDeterministically(t *testing.T) {
 		t.Fatal(err)
 	}
 	var first, second, stderr bytes.Buffer
-	if code := run([]string{"map", root}, &first, &stderr); code != 0 {
+	if code := run([]string{"map", "--no-serve", root}, &first, &stderr); code != 0 {
 		t.Fatalf("first map exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if code := run([]string{"map", root}, &second, &stderr); code != 0 {
+	if code := run([]string{"map", "--no-serve", root}, &second, &stderr); code != 0 {
 		t.Fatalf("second map exit code = %d, stderr = %q", code, stderr.String())
 	}
-	firstLines := strings.SplitN(first.String(), "\n", 2)
-	secondLines := strings.SplitN(second.String(), "\n", 2)
-	if len(firstLines) != 2 || len(secondLines) != 2 || !strings.HasPrefix(firstLines[0], "SAVED_SCAN id=") || !strings.HasPrefix(secondLines[0], "SAVED_SCAN id=") || firstLines[0] == secondLines[0] || firstLines[1] != secondLines[1] {
+	firstResult, firstScan := splitScanFooter(t, first.String(), "SAVED_SCAN")
+	secondResult, secondScan := splitScanFooter(t, second.String(), "SAVED_SCAN")
+	if firstScan == secondScan || firstResult != secondResult {
 		t.Fatal("unchanged repository produced different analysis output or reused a scan ID")
+	}
+	coverageStart := strings.Index(firstResult, "COVERAGE status=")
+	if coverageStart < 0 || strings.Contains(firstResult[coverageStart:], "UNRESOLVED_IMPORT") || strings.Contains(firstResult[coverageStart:], "UNCLASSIFIED_IMPORT") {
+		t.Fatal("analysis issues must precede the final coverage summary")
 	}
 	for _, want := range []string{
 		"COVERAGE status=completed_with_gaps",
@@ -90,7 +94,7 @@ func TestMapReportsCoverageDeterministically(t *testing.T) {
 
 func TestMapMissingDirectoryFails(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"map", filepath.Join(t.TempDir(), "missing")}, &stdout, &stderr); code != 1 {
+	if code := run([]string{"map", "--no-serve", filepath.Join(t.TempDir(), "missing")}, &stdout, &stderr); code != 1 {
 		t.Fatalf("map exit code = %d, want 1", code)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "no such file or directory") {
@@ -109,14 +113,11 @@ func TestSavedScanCommandsReadStoredResult(t *testing.T) {
 		}
 	}
 	var mapped, listed, shown, stderr bytes.Buffer
-	if code := run([]string{"map", root}, &mapped, &stderr); code != 0 {
+	if code := run([]string{"map", "--no-serve", root}, &mapped, &stderr); code != 0 {
 		t.Fatalf("map exit code = %d, stderr = %q", code, stderr.String())
 	}
-	firstLine, original, ok := strings.Cut(mapped.String(), "\n")
-	if !ok || !strings.HasPrefix(firstLine, "SAVED_SCAN id=") {
-		t.Fatalf("map output = %q", mapped.String())
-	}
-	id := strings.Fields(strings.TrimPrefix(firstLine, "SAVED_SCAN id="))[0]
+	original, savedLine := splitScanFooter(t, mapped.String(), "SAVED_SCAN")
+	id := strings.Fields(strings.TrimPrefix(savedLine, "SAVED_SCAN id="))[0]
 	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
 		t.Fatal(err)
 	}
@@ -126,10 +127,23 @@ func TestSavedScanCommandsReadStoredResult(t *testing.T) {
 	if code := run([]string{"show", root, id}, &shown, &stderr); code != 0 {
 		t.Fatalf("show exit code = %d, stderr = %q", code, stderr.String())
 	}
-	storedLine, storedResult, ok := strings.Cut(shown.String(), "\n")
-	if !ok || !strings.HasPrefix(storedLine, "STORED_SCAN id="+id) || storedResult != original {
+	storedResult, storedLine := splitScanFooter(t, shown.String(), "STORED_SCAN")
+	if !strings.HasPrefix(storedLine, "STORED_SCAN id="+id+" ") || storedResult != original {
 		t.Fatalf("stored result changed: %q", shown.String())
 	}
+}
+
+func splitScanFooter(t *testing.T, output, prefix string) (string, string) {
+	t.Helper()
+	index := strings.LastIndex(strings.TrimSuffix(output, "\n"), "\n")
+	if index < 0 {
+		t.Fatalf("missing analysis output before scan metadata: %q", output)
+	}
+	result, footer := output[:index+1], strings.TrimSuffix(output[index+1:], "\n")
+	if !strings.HasPrefix(footer, prefix+" id=") || !strings.Contains(footer, " created_at=") || !strings.Contains(footer, " status=") {
+		t.Fatalf("missing scan metadata at bottom: %q", output)
+	}
+	return result, footer
 }
 
 func TestQueryCommandsUseRequestedSnapshot(t *testing.T) {
@@ -235,11 +249,11 @@ func TestSymbolsReadsSavedDeclarations(t *testing.T) {
 		}
 	}
 	var mapped, stderr bytes.Buffer
-	if code := run([]string{"map", root}, &mapped, &stderr); code != 0 {
+	if code := run([]string{"map", "--no-serve", root}, &mapped, &stderr); code != 0 {
 		t.Fatalf("map = %d: %s", code, stderr.String())
 	}
-	firstLine, _, _ := strings.Cut(mapped.String(), "\n")
-	id := strings.Fields(strings.TrimPrefix(firstLine, "SAVED_SCAN id="))[0]
+	_, savedLine := splitScanFooter(t, mapped.String(), "SAVED_SCAN")
+	id := strings.Fields(strings.TrimPrefix(savedLine, "SAVED_SCAN id="))[0]
 	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
 		t.Fatal(err)
 	}
