@@ -7,6 +7,7 @@ import { Details } from "../components/Details";
 import { MapNode, type CardFile, type MapFlowNode } from "../components/MapNode";
 import { DependencyEdge } from "../components/DependencyEdge";
 import { loadImpact, loadInitialData } from "../lib/api";
+import { buildNodePresentations, type NodePresentation } from "../lib/languagePresentation";
 import { layoutVisibleGraph } from "../lib/layout";
 import { buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, packageSourceCounts, revealNode } from "../lib/presentation";
 import type { DeclarationKind, GraphNode, Impact, LoadedData } from "../lib/types";
@@ -19,7 +20,7 @@ type Theme = "system" | "light" | "dark";
 interface GraphCanvasProps {
   nodes: MapFlowNode[];
   edges: Edge[];
-  hasPackages: boolean;
+  hasCards: boolean;
   importCount: number;
   impactActive: boolean;
   impactTargetID: string | null;
@@ -29,7 +30,7 @@ interface GraphCanvasProps {
   selectedPackageID: string | null;
   focusActive: boolean;
   connectedOnly: boolean;
-  hiddenPackageCount: number;
+  hiddenCardCount: number;
   onClearImpact: () => void;
   onShowImpact: (id: string) => void;
   onResetPositions: () => void;
@@ -42,7 +43,7 @@ interface GraphCanvasProps {
 }
 
 function GraphCanvas(props: GraphCanvasProps) {
-  const { nodes, edges, hasPackages, importCount, impactActive, impactTargetID, impactTargetName, impactLoading, impactError, selectedPackageID, focusActive, connectedOnly, hiddenPackageCount, onClearImpact, onShowImpact, onResetPositions, onToggleConnectedOnly, onSelectNode, onSelectEdge, onClearSelection, onToggleNode, onDragStop } = props;
+  const { nodes, edges, hasCards, importCount, impactActive, impactTargetID, impactTargetName, impactLoading, impactError, selectedPackageID, focusActive, connectedOnly, hiddenCardCount, onClearImpact, onShowImpact, onResetPositions, onToggleConnectedOnly, onSelectNode, onSelectEdge, onClearSelection, onToggleNode, onDragStop } = props;
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<MapFlowNode>(nodes);
 
   // Structural and selection changes come from the presentation layer. Drag frames
@@ -62,7 +63,7 @@ function GraphCanvas(props: GraphCanvasProps) {
           {impactActive && <button className="map-clear-impact" type="button" onClick={onClearImpact}>Clear impact</button>}
         </div>
         {!impactActive && focusActive && <button className="map-connected-action" type="button" onClick={onToggleConnectedOnly} aria-pressed={connectedOnly}>
-          {connectedOnly ? `Show full map (${hiddenPackageCount} hidden)` : "Show connected only"}
+          {connectedOnly ? `Show full map (${hiddenCardCount} hidden)` : "Show connected only"}
         </button>}
         <div className="map-utility-actions">
           <button type="button" onClick={onResetPositions} title="Restore the current graph's starting layout">Reset positions</button>
@@ -71,7 +72,7 @@ function GraphCanvas(props: GraphCanvasProps) {
       {impactError && <span className="map-action-error" role="alert">{impactError}</span>}
     </div>
     <div className="graph-stage">
-      {!hasPackages ? <div className="graph-empty">This saved scan has no packages or modules to display.</div> : <ReactFlow<MapFlowNode, Edge>
+      {!hasCards ? <div className="graph-empty">This saved scan has no packages or modules to display.</div> : <ReactFlow<MapFlowNode, Edge>
         nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onVisualNodeChange}
         onNodeClick={(_, node) => onSelectNode(node.id)}
         onNodeDoubleClick={(_, node) => onToggleNode(node.id)}
@@ -159,7 +160,9 @@ function MapApp() {
     expandedFiles,
     visibleDeclarationKinds: visibleKinds,
   }) : { nodes: [], edges: [] }, [data, expandedPackages, expandedFiles, visibleKinds]);
+  const canonicalNodes = useMemo(() => new Map(data?.canonicalGraph.nodes.map((node) => [node.id, node]) ?? []), [data]);
   const visibleNodes = useMemo(() => new Map(visibleGraph.nodes.map((node) => [node.id, node])), [visibleGraph]);
+  const presentations = useMemo(() => data ? buildNodePresentations(data.canonicalGraph, packageSourceCounts(data.canonicalGraph)) : new Map<string, NodePresentation>(), [data]);
   const cardFiles = useMemo(() => {
     const children = new Map<string, typeof visibleGraph.nodes>();
     for (const node of visibleGraph.nodes) {
@@ -170,25 +173,24 @@ function MapApp() {
     }
     const files = new Map<string, CardFile[]>();
     for (const node of visibleGraph.nodes) {
-      if (node.kind !== "FILE") continue;
+      if (presentations.get(node.id)?.expansion !== "source") continue;
       if (!node.parentId) {
-        files.set(node.id, [{ file: { ...node, expanded: true, childCount: 0 }, declarations: children.get(node.id) ?? [] }]);
+        files.set(node.id, [{ file: { ...node, expanded: true, childCount: 0, presentation: presentations.get(node.id)! }, declarations: (children.get(node.id) ?? []).map((child) => ({ ...child, presentation: presentations.get(child.id)! })) }]);
         continue;
       }
       const group = files.get(node.parentId) ?? [];
-      group.push({ file: node, declarations: children.get(node.id) ?? [] });
+      group.push({ file: { ...node, presentation: presentations.get(node.id)! }, declarations: (children.get(node.id) ?? []).map((child) => ({ ...child, presentation: presentations.get(child.id)! })) });
       files.set(node.parentId, group);
     }
     return files;
-  }, [visibleGraph]);
+  }, [visibleGraph, presentations]);
   const cardGraph = useMemo(() => ({
-    nodes: visibleGraph.nodes.filter((node) => node.kind === "PACKAGE" || (node.kind === "FILE" && !node.parentId)),
+    nodes: visibleGraph.nodes.filter((node) => presentations.get(node.id)?.primaryCard),
     edges: visibleGraph.edges.filter((edge) => edge.kind === "IMPORTS").map((edge) => ({ ...edge, source: edge.target, target: visibleNodes.get(edge.source)?.parentId ?? edge.source })),
-  }), [visibleGraph, visibleNodes]);
+  }), [visibleGraph, visibleNodes, presentations]);
   const exportUses = useMemo(() => data ? buildExportUseIndex(data.canonicalGraph) : new Map(), [data]);
   const fileRoles = useMemo(() => data ? fileDependencyRoles(data.canonicalGraph) : { importing: new Set<string>(), supplying: new Set<string>() }, [data]);
-  const packageCounts = useMemo(() => data ? packageSourceCounts(data.canonicalGraph) : new Map(), [data]);
-  const cardLines = useMemo(() => visibleGraph.edges.filter((edge) => edge.kind === "IMPORTS").flatMap((edge) => importCardLines(edge, visibleNodes, exportUses)), [visibleGraph, visibleNodes, exportUses]);
+  const cardLines = useMemo(() => visibleGraph.edges.filter((edge) => edge.kind === "IMPORTS").flatMap((edge) => importCardLines(edge, visibleNodes, exportUses, canonicalNodes)), [visibleGraph, visibleNodes, exportUses, canonicalNodes]);
   const importEdgesByID = useMemo(() => new Map(visibleGraph.edges.filter((edge) => edge.kind === "IMPORTS").map((edge) => [edge.id, edge])), [visibleGraph]);
   const positioned = useMemo(() => {
     if (!data) return [];
@@ -210,10 +212,11 @@ function MapApp() {
 
   const toggleNode = useCallback((id: string) => {
     const item = visibleNodes.get(id);
-    if (!item || item.childCount === 0) return;
-    if (item.kind === "PACKAGE") setExpandedPackages((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
-    if (item.kind === "FILE") setExpandedFiles((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
-  }, [visibleNodes]);
+    if (!item) return;
+    const expansion = presentations.get(id)?.expansion;
+    if (expansion === "container") setExpandedPackages((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    if (expansion === "source") setExpandedFiles((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  }, [visibleNodes, presentations]);
 
   const selectNode = useCallback((id: string) => {
     if (!data) return;
@@ -236,14 +239,15 @@ function MapApp() {
     let innerFrame = 0;
     const outerFrame = requestAnimationFrame(() => {
       innerFrame = requestAnimationFrame(() => {
-        const item = visibleNodes.get(focusID);
-        const cardID = item?.kind === "PACKAGE" ? item.id : item?.kind === "FILE" ? item.parentId ?? item.id : (visibleNodes.get(item?.parentId ?? "")?.parentId ?? item?.parentId);
+        let item = visibleNodes.get(focusID);
+        while (item && !presentations.get(item.id)?.primaryCard) item = visibleNodes.get(item.parentId ?? "");
+        const cardID = item?.id;
         if (cardID) void fitView({ nodes: [{ id: cardID }], padding: 0.8, duration: 0 });
         setFocusID(null);
       });
     });
     return () => { cancelAnimationFrame(outerFrame); cancelAnimationFrame(innerFrame); };
-  }, [focusID, visibleNodes, fitView]);
+  }, [focusID, visibleNodes, presentations, fitView]);
 
   const showImpact = useCallback(async (id: string) => {
     const request = ++impactRequest.current;
@@ -262,22 +266,22 @@ function MapApp() {
 
   const impactDistances = useMemo(() => new Map(impact?.affected.map((item) => [item.id, item.distance]) ?? []), [impact]);
   const impactEdges = useMemo(() => new Set(impact?.graph.edges.map((edge) => `${edge.from}->${edge.to}`) ?? []), [impact]);
-  const focusedPackageID = useMemo(() => {
+  const focusedCardID = useMemo(() => {
     if (impact) return null;
     let node = selectedNodeID ? visibleNodes.get(selectedNodeID) : undefined;
-    while (node?.parentId && node.kind !== "PACKAGE") node = visibleNodes.get(node.parentId ?? "");
+    while (node && !presentations.get(node.id)?.primaryCard) node = visibleNodes.get(node.parentId ?? "");
     return node?.id ?? null;
-  }, [impact, selectedNodeID, visibleNodes]);
-  const relatedPackages = useMemo(() => {
+  }, [impact, selectedNodeID, visibleNodes, presentations]);
+  const relatedCards = useMemo(() => {
     if (impact) return null;
-    if (focusedPackageID) return directlyConnectedPackages(cardGraph, focusedPackageID);
+    if (focusedCardID) return directlyConnectedPackages(cardGraph, focusedCardID);
     const selected = selectedEdgeID ? importEdgesByID.get(selectedEdgeID) : undefined;
     return selected?.projectionEdge ? new Set([selected.projectionEdge.from, selected.projectionEdge.to]) : null;
-  }, [impact, focusedPackageID, selectedEdgeID, importEdgesByID, cardGraph]);
-  const shownPackageIDs = connectedOnly ? relatedPackages : null;
-  const shownPackages = useMemo(() => shownPackageIDs ? cardGraph.nodes.filter((item) => shownPackageIDs.has(item.id)) : cardGraph.nodes, [cardGraph.nodes, shownPackageIDs]);
-  const shownLines = useMemo(() => shownPackageIDs ? cardLines.filter((line) => shownPackageIDs.has(line.source) && shownPackageIDs.has(line.target)) : cardLines, [cardLines, shownPackageIDs]);
-  const flowNodes = useMemo<MapFlowNode[]>(() => shownPackages.map((item) => {
+  }, [impact, focusedCardID, selectedEdgeID, importEdgesByID, cardGraph]);
+  const shownCardIDs = connectedOnly ? relatedCards : null;
+  const shownCards = useMemo(() => shownCardIDs ? cardGraph.nodes.filter((item) => shownCardIDs.has(item.id)) : cardGraph.nodes, [cardGraph.nodes, shownCardIDs]);
+  const shownLines = useMemo(() => shownCardIDs ? cardLines.filter((line) => shownCardIDs.has(line.source) && shownCardIDs.has(line.target)) : cardLines, [cardLines, shownCardIDs]);
+  const flowNodes = useMemo<MapFlowNode[]>(() => shownCards.map((item) => {
     const layout = positions.get(item.id);
     return {
       id: item.id,
@@ -286,15 +290,15 @@ function MapApp() {
       zIndex: item.expanded ? 1 : 0,
       draggable: true,
       selected: !impact && selectedNodeID === item.id,
-      data: { item, files: cardFiles.get(item.id) ?? [], selectedID: impact ? null : selectedNodeID, selectedSupplierID: impact ? null : selectedSupplierID, selectedImporterID: impact ? null : selectedImporterID, impactDistance: impactDistances.get(item.id), impactTarget: impact?.target === item.id, dimmed: relatedPackages !== null && !relatedPackages.has(item.id), importingFiles: fileRoles.importing, supplyingFiles: fileRoles.supplying, sourceCounts: item.kind === "FILE" ? { imports: item.import_count, exports: item.export_count } : packageCounts.get(item.id), onToggle: toggleNode, onSelect: selectNode },
+      data: { item, presentation: presentations.get(item.id)!, files: cardFiles.get(item.id) ?? [], selectedID: impact ? null : selectedNodeID, selectedSupplierID: impact ? null : selectedSupplierID, selectedImporterID: impact ? null : selectedImporterID, impactDistance: impactDistances.get(item.id), impactTarget: impact?.target === item.id, dimmed: relatedCards !== null && !relatedCards.has(item.id), importingFiles: fileRoles.importing, supplyingFiles: fileRoles.supplying, onToggle: toggleNode, onSelect: selectNode },
     };
-  }), [shownPackages, cardFiles, positions, manualPositions, selectedNodeID, selectedSupplierID, selectedImporterID, impactDistances, impact, relatedPackages, fileRoles, packageCounts, toggleNode, selectNode]);
+  }), [shownCards, cardFiles, positions, manualPositions, selectedNodeID, selectedSupplierID, selectedImporterID, impactDistances, impact, relatedCards, fileRoles, presentations, toggleNode, selectNode]);
   const flowEdges = useMemo<Edge[]>(() => shownLines.map((line) => {
     const item = importEdgesByID.get(line.canonicalEdgeID)!;
     const selected = !impact && selectedEdgeID === item.id;
-    const focused = focusedPackageID !== null && (line.source === focusedPackageID || line.target === focusedPackageID);
+    const focused = focusedCardID !== null && (line.source === focusedCardID || line.target === focusedCardID);
     const impacted = item.projectionEdge && impactEdges.has(`${item.projectionEdge.from}->${item.projectionEdge.to}`);
-    const opacity = selected ? 1 : focused ? 1 : relatedPackages !== null ? .18 : impacted ? 1 : impact ? .4 : .78;
+    const opacity = selected ? 1 : focused ? 1 : relatedCards !== null ? .18 : impacted ? 1 : impact ? .4 : .78;
     return {
       id: line.id,
       source: line.source,
@@ -307,7 +311,7 @@ function MapApp() {
       selectable: item.kind === "IMPORTS",
       style: { strokeOpacity: opacity, strokeWidth: selected ? 1.6 : focused || impacted ? 1.4 : .95 },
     };
-  }), [shownLines, importEdgesByID, selectedEdgeID, focusedPackageID, relatedPackages, impact, impactEdges]);
+  }), [shownLines, importEdgesByID, selectedEdgeID, focusedCardID, relatedCards, impact, impactEdges]);
 
   if (loading) return <div className="startup-screen"><p>Loading saved graph…</p></div>;
   if (loadError || !data) return <div className="startup-screen error-screen"><h1>Unable to connect to the local nami API.</h1><p>{loadError}</p><span>Start it with</span><code>nami serve &lt;directory&gt; &lt;scan-id&gt;</code></div>;
@@ -332,7 +336,7 @@ function MapApp() {
     <main className="workspace">
       <Explorer canonicalGraph={canonicalGraph} visibleGraph={visibleGraph} selectedNodeID={impact ? null : selectedNodeID} search={search} visibleDeclarationKinds={visibleKinds} onSearch={setSearch} onSelectNode={selectNode} onToggle={toggleNode} onToggleKind={(kind) => { setVisibleKinds((current) => { const next = new Set(current); next.has(kind) ? next.delete(kind) : next.add(kind); return next; }); }} />
       <GraphCanvas
-        nodes={flowNodes} edges={flowEdges} hasPackages={cardGraph.nodes.length > 0}
+        nodes={flowNodes} edges={flowEdges} hasCards={cardGraph.nodes.length > 0}
         importCount={new Set(shownLines.map((line) => line.canonicalEdgeID)).size}
         impactActive={impact !== null}
         impactTargetID={impact?.target ?? null}
@@ -341,8 +345,8 @@ function MapApp() {
         impactError={impactError}
         selectedPackageID={selectedNode?.kind === "PACKAGE" ? selectedNode.id : null}
         focusActive={selectedNodeID !== null || selectedEdgeID !== null}
-        connectedOnly={connectedOnly && shownPackageIDs !== null}
-        hiddenPackageCount={cardGraph.nodes.length - shownPackages.length}
+        connectedOnly={connectedOnly && shownCardIDs !== null}
+        hiddenCardCount={cardGraph.nodes.length - shownCards.length}
         onClearImpact={() => { impactRequest.current++; setImpact(null); setImpactError(null); setImpactLoading(false); }}
         onShowImpact={showImpact}
         onResetPositions={() => setManualPositions({})}

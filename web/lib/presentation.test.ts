@@ -1,6 +1,7 @@
+import { buildNodePresentations, presentationFor, sourceStatsTitle } from "./languagePresentation.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, packageSourceCounts, revealNode, type PresentationInput } from "./presentation.ts";
+import { buildExplorerTree, buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, packageSourceCounts, revealNode, type PresentationInput } from "./presentation.ts";
 import { declarationKinds, type Graph, type PackageProjection } from "./types.ts";
 
 const canonicalGraph: Graph = {
@@ -119,7 +120,7 @@ test("saved export-use evidence anchors a dependency line to its supplying file"
   const edge = expanded.edges.find((item) => item.kind === "IMPORTS");
   assert.ok(edge);
   assert.deepEqual(importCardLines(edge, nodes, buildExportUseIndex(canonicalGraph)), [{
-    id: `${edge.id}|file:a.go|file:b.go`, canonicalEdgeID: edge.id, source: "package:B", sourceHandle: "file:b.go", target: "package:A", targetHandle: "file:a.go", importingFileID: "file:a.go", supplyingFileID: "file:b.go",
+    id: JSON.stringify([edge.id, "file:a.go", "file:b.go"]), canonicalEdgeID: edge.id, source: "package:B", sourceHandle: "file:b.go", target: "package:A", targetHandle: "file:a.go", importingFileID: "file:a.go", supplyingFileID: "file:b.go",
   }]);
   const extraFile = { id: "file:extra.go", kind: "FILE" as const, name: "extra.go", path: "store/extra.go", parentId: "package:B", childCount: 0, expanded: false };
   nodes.set(extraFile.id, extraFile);
@@ -207,4 +208,140 @@ test("standalone Python files and declarations render without synthetic packages
   assert.equal(visible.nodes.length, 2);
   assert.equal(visible.nodes.find((node) => node.kind === "FILE")?.parentId, undefined);
   assert.equal(visible.nodes.find((node) => node.kind === "CLASS")?.parentId, "file:tool.py");
+});
+
+test("Go presentation keeps package cards and canonical file labels", () => {
+  const pkg = { id: "package:auth", kind: "PACKAGE" as const, language: "go", name: "auth", path: "internal/auth" };
+  const file = { id: "file:auth.go", kind: "FILE" as const, language: "go", name: "auth.go", path: "internal/auth/auth.go", import_count: 2, export_count: 3 };
+  const container = presentationFor(pkg, undefined, { imports: 2, exports: 3 });
+  assert.equal(container.primaryCard, true);
+  assert.equal(container.cardName, "internal/auth");
+  assert.equal(container.secondaryLabel, "package auth");
+  assert.equal(container.rowGroupLabel, "Files");
+  assert.deepEqual(container.sourceStats, { imports: 2, exports: 3 });
+  const source = presentationFor(file, pkg);
+  assert.equal(source.displayKind, "file");
+  assert.equal(source.displayName, "auth.go");
+  assert.equal(source.primaryCard, false);
+  assert.deepEqual(source.sourceStats, { imports: 2, exports: 3 });
+  assert.equal(presentationFor(file).explorerSection, undefined);
+  assert.equal(presentationFor({ ...pkg, kind: "MODULE" }).displayKind, "module");
+});
+
+test("Python profiles present modules without changing canonical file kinds", () => {
+  const pkg = { id: "python-package:users", kind: "PACKAGE" as const, language: "python", name: "users", path: "users" };
+  const file = { id: "file:users/service.py", kind: "FILE" as const, language: "python", name: "service.py", path: "users/service.py", import_count: 2 };
+  const profile = presentationFor(file, pkg);
+  assert.equal(file.kind, "FILE");
+  assert.equal(profile.displayKind, "module");
+  assert.equal(profile.displayName, "users.service");
+  assert.equal(profile.rowName, "service");
+  assert.equal(profile.primaryCard, false);
+  assert.equal(presentationFor(pkg).primaryCard, true);
+  assert.equal(presentationFor(pkg).rowGroupLabel, "Modules");
+  assert.equal(presentationFor({ ...file, name: "__init__.py" }, pkg).displayName, "users");
+  const standalone = presentationFor({ ...file, name: "standalone.py", path: "standalone.py" });
+  assert.equal(standalone.displayName, "standalone");
+  assert.equal(standalone.primaryCard, true);
+  assert.equal(standalone.explorerSection, "modules");
+  assert.equal(sourceStatsTitle(profile.sourceStats), "2 imports, unknown exports");
+  assert.equal(profile.sourceStats.exports, undefined);
+  assert.equal(presentationFor(pkg, undefined, { imports: 0, exports: 0 }).sourceStats.exports, undefined);
+});
+
+test("unknown language combinations retain canonical labels without guessed card semantics", () => {
+  const file = { id: "file:unknown.py", kind: "FILE" as const, name: "unknown.py", path: "unknown.py" };
+  for (const node of [file, { ...file, language: "go" }, { ...file, language: "unknown" }]) {
+    const profile = presentationFor(node);
+    assert.equal(profile.displayKind, "file");
+    assert.equal(profile.explorerSection, undefined);
+    assert.equal(profile.primaryCard, false);
+  }
+  assert.equal(presentationFor({ ...file, kind: "MODULE", language: "python" }).expansion, undefined);
+  assert.equal(presentationFor({ ...file, kind: "CLASS", language: "go" }).expansion, undefined);
+});
+
+const nestedPythonGraph: Graph = {
+  nodes: [
+    { id: "python-package:users", kind: "PACKAGE", language: "python", name: "users", path: "users" },
+    { id: "python-package:users/admin", kind: "PACKAGE", language: "python", name: "users.admin", path: "users/admin" },
+    { id: "file:users/admin/service.py", kind: "FILE", language: "python", name: "service.py", path: "users/admin/service.py", import_count: 2 },
+    { id: "file:users/models.py", kind: "FILE", language: "python", name: "models.py", path: "users/models.py", import_count: 0 },
+    { id: "file:users/service.py", kind: "FILE", language: "python", name: "service.py", path: "users/service.py", import_count: 0 },
+    { id: "file:standalone.py", kind: "FILE", language: "python", name: "standalone.py", path: "standalone.py", import_count: 0 },
+  ],
+  edges: [
+    { kind: "CONTAINS", from: "python-package:users", to: "python-package:users/admin" },
+    { kind: "CONTAINS", from: "python-package:users/admin", to: "file:users/admin/service.py" },
+    { kind: "CONTAINS", from: "python-package:users", to: "file:users/models.py" },
+    { kind: "CONTAINS", from: "python-package:users", to: "file:users/service.py" },
+    { kind: "IMPORTS", from: "file:users/admin/service.py", to: "file:users/models.py" },
+    { kind: "IMPORTS", from: "file:users/admin/service.py", to: "file:users/service.py" },
+  ],
+};
+const nestedProjection: PackageProjection = {
+  graph: { nodes: nestedPythonGraph.nodes.filter((node) => node.kind === "PACKAGE"), edges: [{ kind: "IMPORTS", from: "python-package:users/admin", to: "python-package:users" }] },
+  evidence: [{ edge: { kind: "IMPORTS", from: "python-package:users/admin", to: "python-package:users" }, sources: nestedPythonGraph.edges.slice(4) }],
+};
+const nestedInput = (): PresentationInput => ({ canonicalGraph: nestedPythonGraph, packageProjection: nestedProjection, expandedPackages: new Set(["python-package:users"]), expandedFiles: new Set(), visibleDeclarationKinds: new Set(declarationKinds) });
+
+test("nested Python packages stay nested in Explorer and independent in the graph", () => {
+  const visible = buildVisibleGraph(nestedInput());
+  const tree = buildExplorerTree(nestedPythonGraph, visible);
+  assert.deepEqual(tree.packages.map((node) => node.id), ["python-package:users"]);
+  assert.deepEqual(tree.children.get("python-package:users")?.map((node) => node.id), ["file:users/models.py", "file:users/service.py", "python-package:users/admin"]);
+  assert.deepEqual(tree.modules.map((node) => node.id), ["file:standalone.py"]);
+  assert.equal(visible.nodes.find((node) => node.id === "python-package:users/admin")?.parentId, undefined);
+  const profiles = buildNodePresentations(nestedPythonGraph);
+  assert.equal(profiles.get("python-package:users/admin")?.rowName, "admin");
+  assert.equal(profiles.get("file:users/admin/service.py")?.displayName, "users.admin.service");
+});
+
+test("duplicate projected imports produce exactly one line per importer-provider pair", () => {
+  const visible = buildVisibleGraph(nestedInput());
+  const nodes = new Map(visible.nodes.map((node) => [node.id, node]));
+  const edge = visible.edges.find((edge) => edge.kind === "IMPORTS")!;
+  const lines = importCardLines(edge, nodes, buildExportUseIndex(nestedPythonGraph));
+  assert.equal(lines.length, 2);
+  assert.equal(new Set(lines.map((line) => line.id)).size, 2);
+  assert.deepEqual(lines.map((line) => line.supplyingFileID), ["file:users/models.py", "file:users/service.py"]);
+  assert.ok(lines.every((line) => line.importingFileID === "file:users/admin/service.py"));
+  assert.deepEqual(importCardLines(edge, nodes, buildExportUseIndex(nestedPythonGraph)), lines);
+  assert.deepEqual(importCardLines({ ...edge, evidence: [...edge.evidence].reverse().concat(edge.evidence) }, nodes, buildExportUseIndex(nestedPythonGraph)), lines);
+  const collapsed = buildVisibleGraph({ ...nestedInput(), expandedPackages: new Set() });
+  const collapsedEdge = collapsed.edges.find((edge) => edge.kind === "IMPORTS")!;
+  const collapsedLines = importCardLines(collapsedEdge, new Map(collapsed.nodes.map((node) => [node.id, node])), buildExportUseIndex(nestedPythonGraph), new Map(nestedPythonGraph.nodes.map((node) => [node.id, node])));
+  assert.equal(collapsedLines.length, 2);
+  assert.equal(new Set(collapsedLines.map((line) => line.id)).size, 2);
+  assert.deepEqual(collapsedLines.map((line) => line.supplyingFileID), ["file:users/models.py", "file:users/service.py"]);
+  assert.ok(collapsedLines.every((line) => line.sourceHandle === undefined));
+  const expanded = buildVisibleGraph({ ...nestedInput(), expandedPackages: new Set(["python-package:users", "python-package:users/admin"]) });
+  const expandedNodes = new Map(expanded.nodes.map((node) => [node.id, node]));
+  const expandedLines = expanded.edges.filter((edge) => edge.kind === "IMPORTS").flatMap((edge) => importCardLines(edge, expandedNodes, buildExportUseIndex(nestedPythonGraph)));
+  assert.equal(expandedLines.length, 2);
+  assert.equal(new Set(expandedLines.map((line) => line.id)).size, 2);
+});
+
+test("different importers sharing providers keep unique deterministic line IDs", () => {
+  const visible = buildVisibleGraph(nestedInput());
+  const nodes = new Map(visible.nodes.map((node) => [node.id, node]));
+  const edge = visible.edges.find((edge) => edge.kind === "IMPORTS")!;
+  const evidence = [...edge.evidence, ...edge.evidence.map((fact) => ({ ...fact, from: "file:users/admin/other.py" }))];
+  const lines = importCardLines({ ...edge, evidence }, nodes, buildExportUseIndex(nestedPythonGraph));
+  assert.equal(lines.length, 4);
+  assert.equal(new Set(lines.map((line) => line.id)).size, 4);
+  assert.deepEqual(importCardLines({ ...edge, evidence: [...evidence].reverse() }, nodes, buildExportUseIndex(nestedPythonGraph)), lines);
+});
+
+test("unprojected standalone module imports remain canonical presentation facts", () => {
+  const canonical: Graph = { ...nestedPythonGraph, edges: [...nestedPythonGraph.edges, { kind: "IMPORTS", from: "file:standalone.py", to: "file:users/models.py" }] };
+  const visible = buildVisibleGraph({ ...nestedInput(), canonicalGraph: canonical });
+  const dependency = visible.edges.find((edge) => edge.source === "file:standalone.py");
+  assert.ok(dependency);
+  assert.deepEqual(dependency.evidence, [{ kind: "IMPORTS", from: "file:standalone.py", to: "file:users/models.py" }]);
+  assert.equal(dependency.projectionEdge, undefined);
+  const lines = importCardLines(dependency, new Map(visible.nodes.map((node) => [node.id, node])), buildExportUseIndex(canonical));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].sourceHandle, "file:users/models.py");
+  assert.equal(lines[0].target, "file:standalone.py");
 });

@@ -1,3 +1,4 @@
+import { presentationFor } from "./languagePresentation.ts";
 import { declarationKinds, type DeclarationKind, type Graph, type GraphEdge, type GraphNode, type PackageProjection } from "./types.ts";
 
 export interface VisibleNode extends GraphNode {
@@ -91,26 +92,28 @@ export function buildExportUseIndex(graph: Graph): ExportUseIndex {
 }
 
 // Visual direction is dependency -> importer; saved IMPORTS edges remain file -> package.
-export function importCardLines(edge: VisibleEdge, nodes: ReadonlyMap<string, VisibleNode>, exportUses: ExportUseIndex): CardImportLine[] {
+export function importCardLines(edge: VisibleEdge, nodes: ReadonlyMap<string, VisibleNode>, exportUses: ExportUseIndex, canonicalNodes: ReadonlyMap<string, GraphNode> = nodes): CardImportLine[] {
   const importingPackage = nodes.get(edge.source)?.kind === "FILE" ? nodes.get(edge.source)?.parentId ?? edge.source : edge.source;
   const dependencyExpanded = nodes.get(edge.target)?.expanded ?? false;
   const importerExpanded = nodes.get(importingPackage)?.expanded ?? false;
-  const importers = edge.evidence.length ? edge.evidence.map((source) => source.from) : [edge.source];
-  if (!dependencyExpanded) {
+  const importers = [...new Set(edge.evidence.length ? edge.evidence.map((source) => source.from) : [edge.source])].sort(compare);
+  const directProviders = (importer: string) => edge.evidence.filter((fact) => fact.from === importer && canonicalNodes.get(fact.to)?.kind === "FILE").map((fact) => fact.to);
+  if (!dependencyExpanded && !importers.some((importer) => directProviders(importer).length > 0)) {
     return [{ id: edge.id, canonicalEdgeID: edge.id, source: edge.target, target: importingPackage,
       targetHandle: importerExpanded && importers.length === 1 ? importers[0] : undefined,
-      importingFileID: importers.length === 1 && edge.evidence.length === 1 ? importers[0] : undefined }];
+      importingFileID: importers.length === 1 && edge.evidence.length ? importers[0] : undefined }];
   }
   const lines: CardImportLine[] = [];
   for (const importer of importers) {
-    const moduleProviders = edge.evidence.filter((fact) => fact.from === importer && nodes.get(fact.to)?.kind === "FILE").map((fact) => fact.to);
-    const providers = moduleProviders.length ? moduleProviders : exportUses.get(importer)?.get(edge.target) ?? [];
+    const moduleProviders = directProviders(importer);
+    const providers = [...new Set(moduleProviders.length ? moduleProviders : exportUses.get(importer)?.get(edge.target) ?? [])].sort(compare);
     for (const provider of providers.length ? providers : [undefined]) {
       lines.push({
-        id: `${edge.id}|${importer}|${provider ?? "package"}`,
+        // Encode the tuple so separators inside canonical IDs cannot collide.
+        id: JSON.stringify([edge.id, importer, provider ?? null]),
         canonicalEdgeID: edge.id,
         source: edge.target,
-        sourceHandle: provider,
+        sourceHandle: dependencyExpanded ? provider : undefined,
         target: importingPackage,
         targetHandle: importerExpanded ? importer : undefined,
         importingFileID: importer,
@@ -141,6 +144,8 @@ const edgeKey = (edge: GraphEdge): string => `${edge.kind}:${edge.from}->${edge.
 export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
   const { canonicalGraph, packageProjection, expandedPackages, expandedFiles, visibleDeclarationKinds } = input;
   const canonicalNodes = new Map(canonicalGraph.nodes.map((node) => [node.id, node]));
+  const parent = new Map(canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
+  const profileFor = (node: GraphNode) => presentationFor(node, canonicalNodes.get(parent.get(node.id) ?? ""));
   const children = new Map<string, GraphNode[]>();
   const canonicalImports = new Set(canonicalGraph.edges.filter((edge) => edge.kind === "IMPORTS").map(edgeKey));
   for (const edge of canonicalGraph.edges) {
@@ -162,20 +167,20 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
     nodes.push({
       ...node,
       parentId,
-      childCount: (children.get(node.id) ?? []).filter((child) => node.kind !== "PACKAGE" || child.kind === "FILE").length,
-      expanded: node.kind === "PACKAGE" ? expandedPackages.has(node.id) :
-        node.kind === "FILE" ? expandedFiles.has(node.id) : false,
+      childCount: (children.get(node.id) ?? []).filter((child) => profileFor(node).expansion !== "container" || profileFor(child).expansion === "source").length,
+      expanded: profileFor(node).expansion === "container" ? expandedPackages.has(node.id) :
+        profileFor(node).expansion === "source" ? expandedFiles.has(node.id) : false,
     });
     if (parentId) {
       edges.push({ id: `CONTAINS:${parentId}->${node.id}`, kind: "CONTAINS", source: parentId, target: node.id, evidence: [] });
     }
   };
 
-  for (const pkg of [...packageProjection.graph.nodes].sort((a, b) => compare(a.id, b.id))) {
+  for (const pkg of canonicalGraph.nodes.filter((node) => profileFor(node).primaryCard && profileFor(node).expansion === "container").sort((a, b) => compare(a.id, b.id))) {
     addNode(pkg);
     if (!expandedPackages.has(pkg.id)) continue;
     for (const file of children.get(pkg.id) ?? []) {
-      if (file.kind !== "FILE") continue;
+      if (profileFor(file).expansion !== "source") continue;
       addNode(file, pkg.id);
       if (!expandedFiles.has(file.id)) continue;
       for (const declaration of children.get(file.id) ?? []) {
@@ -186,8 +191,7 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
     }
   }
 
-  const parent = new Map(canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
-  for (const file of canonicalGraph.nodes.filter((node) => node.kind === "FILE" && !parent.has(node.id))) {
+  for (const file of canonicalGraph.nodes.filter((node) => profileFor(node).primaryCard && profileFor(node).expansion === "source")) {
     addNode(file);
     if (expandedFiles.has(file.id)) for (const declaration of children.get(file.id) ?? []) {
       if (isDeclarationKind(declaration.kind) && visibleDeclarationKinds.has(declaration.kind)) addNode(declaration, file.id);
@@ -197,12 +201,12 @@ export function buildVisibleGraph(input: PresentationInput): VisibleGraph {
   const evidenceByEdge = new Map(packageProjection.evidence.map((item) => [edgeKey(item.edge), item.sources]));
   for (const edge of [...packageProjection.graph.edges].sort((a, b) => compare(edgeKey(a), edgeKey(b)))) {
     if (edge.kind !== "IMPORTS" || !visibleIDs.has(edge.from) || !visibleIDs.has(edge.to)) continue;
-    const evidence = evidenceByEdge.get(edgeKey(edge)) ?? [];
+    const evidence = [...new Map((evidenceByEdge.get(edgeKey(edge)) ?? []).map((source) => [edgeKey(source), source])).values()].sort((a, b) => compare(edgeKey(a), edgeKey(b)));
     if (!expandedPackages.has(edge.from)) {
       edges.push({ id: edgeKey(edge), kind: "IMPORTS", source: edge.from, target: edge.to, projectionEdge: edge, evidence });
       continue;
     }
-    for (const source of [...evidence].sort((a, b) => compare(edgeKey(a), edgeKey(b)))) {
+    for (const source of evidence) {
       if (source.kind !== "IMPORTS" || !visibleIDs.has(source.from) || !canonicalImports.has(edgeKey(source))) continue;
       edges.push({ id: edgeKey(source), kind: "IMPORTS", source: source.from, target: edge.to, projectionEdge: edge, evidence: [source] });
     }
@@ -252,4 +256,30 @@ export function searchNodes(graph: Graph, query: string): GraphNode[] {
     .filter((node) => node.kind !== "MODULE" && [node.name, node.path, node.id].some((field) => field.toLocaleLowerCase().includes(term)))
     .sort((a, b) => compare(a.name, b.name) || compare(a.id, b.id))
     .slice(0, 40);
+}
+
+export function buildExplorerTree(canonicalGraph: Graph, visibleGraph: VisibleGraph): {
+  packages: VisibleNode[];
+  modules: VisibleNode[];
+  children: Map<string, VisibleNode[]>;
+} {
+  const nodes = new Map(canonicalGraph.nodes.map((node) => [node.id, node]));
+  const parents = new Map(canonicalGraph.edges.filter((edge) => edge.kind === "CONTAINS").map((edge) => [edge.to, edge.from]));
+  const visibleIDs = new Set(visibleGraph.nodes.map((node) => node.id));
+  const packages: VisibleNode[] = [];
+  const modules: VisibleNode[] = [];
+  const children = new Map<string, VisibleNode[]>();
+  for (const node of visibleGraph.nodes) {
+    const parentID = parents.get(node.id);
+    const parent = nodes.get(parentID ?? "");
+    const profile = presentationFor(node, parent);
+    if (parentID && visibleIDs.has(parentID)) {
+      const siblings = children.get(parentID) ?? [];
+      siblings.push(node);
+      children.set(parentID, siblings);
+    } else if (profile.explorerSection === "packages") packages.push(node);
+    else if (profile.explorerSection === "modules") modules.push(node);
+  }
+  for (const group of [packages, modules, ...children.values()]) group.sort((a, b) => compare(a.id, b.id));
+  return { packages, modules, children };
 }

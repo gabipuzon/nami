@@ -2,15 +2,21 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, useUpdateNodeInternals, type Node, type NodeProps } from "@xyflow/react";
-import type { PackageSourceCounts, VisibleNode } from "../lib/presentation";
+import { sourceStatsTitle, type NodePresentation } from "../lib/languagePresentation";
+import type { VisibleNode } from "../lib/presentation";
+
+export interface PresentedNode extends VisibleNode {
+  presentation: NodePresentation;
+}
 
 export interface CardFile {
-  file: VisibleNode;
-  declarations: VisibleNode[];
+  file: PresentedNode;
+  declarations: PresentedNode[];
 }
 
 export type MapFlowNode = Node<{
   item: VisibleNode;
+  presentation: NodePresentation;
   files: CardFile[];
   selectedID: string | null;
   selectedSupplierID: string | null;
@@ -20,7 +26,6 @@ export type MapFlowNode = Node<{
   dimmed: boolean;
   importingFiles: ReadonlySet<string>;
   supplyingFiles: ReadonlySet<string>;
-  sourceCounts?: PackageSourceCounts;
   onToggle: (id: string) => void;
   onSelect: (id: string) => void;
 }, "map">;
@@ -51,7 +56,7 @@ function firstRowStartingAtOrAfter(offsets: number[], position: number): number 
 }
 
 export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode>) {
-  const { item, files, selectedID, selectedSupplierID, selectedImporterID, impactDistance, impactTarget, dimmed, importingFiles, supplyingFiles, sourceCounts, onToggle, onSelect } = data;
+  const { item, files, selectedID, selectedSupplierID, selectedImporterID, impactDistance, impactTarget, dimmed, importingFiles, supplyingFiles, presentation, onToggle, onSelect } = data;
   const listRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
@@ -112,28 +117,28 @@ export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode
     }
   }, [selectedID, selectedImporterID, selectedSupplierID, rowLayout, item.expanded, updateGeometry]);
 
-  return <div ref={cardRef} className={["map-node", "map-node-package", item.expanded ? "is-expanded" : "", selectedID === item.id ? "is-selected" : "", impactTarget ? "is-impact-target" : "", impactDistance !== undefined ? "is-affected" : "", dimmed ? "is-dimmed" : ""].filter(Boolean).join(" ")} aria-label={item.kind === "FILE" ? `module ${item.path}` : `folder ${item.path}, package ${item.name}`}>
+  return <div ref={cardRef} className={["map-node", "map-node-package", item.expanded ? "is-expanded" : "", selectedID === item.id ? "is-selected" : "", impactTarget ? "is-impact-target" : "", impactDistance !== undefined ? "is-affected" : "", dimmed ? "is-dimmed" : ""].filter(Boolean).join(" ")} aria-label={`${presentation.displayKind} ${presentation.displayName}`}>
     <Handle type="target" position={Position.Left} isConnectable={false} className="map-handle" />
     <div className="map-node-main">
-      <span className="map-node-identity"><span className="map-node-name" title={item.path}>{item.path}</span><span className="map-node-package-label" title={`${item.kind === "FILE" ? "module" : "package"} ${item.name}`}>{item.kind === "FILE" ? "module" : "package"} {item.name}</span></span>
-      {item.childCount > 0 && <button className="map-node-toggle nodrag nopan" type="button" onClick={(event) => { event.stopPropagation(); onToggle(item.id); }} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${item.name}`}>{item.expanded ? "▾" : "▸"}</button>}
+      <span className="map-node-identity"><span className="map-node-name" title={item.path}>{presentation.cardName}</span>{presentation.secondaryLabel && <span className="map-node-package-label" title={presentation.secondaryLabel}>{presentation.secondaryLabel}</span>}</span>
+      {item.childCount > 0 && <button className="map-node-toggle nodrag nopan" type="button" onClick={(event) => { event.stopPropagation(); onToggle(item.id); }} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${presentation.displayName}`}>{item.expanded ? "▾" : "▸"}</button>}
     </div>
-    <div className="map-node-meta"><span>{item.childCount} {item.kind === "FILE" ? "declarations" : item.childCount === 1 ? "file" : "files"}</span>{!item.expanded && <span className="map-node-folded-counts" title="Import and export declaration totals for analyzed files"><span>in {sourceCounts?.imports ?? "—"}</span><span>out {sourceCounts?.exports ?? "—"}</span></span>}{impactDistance !== undefined && <span className="impact-distance">distance {impactDistance}</span>}</div>
+    <div className="map-node-meta"><span>{item.childCount} {item.childCount === 1 ? presentation.childLabel.singular : presentation.childLabel.plural}</span>{!item.expanded && <span className="map-node-folded-counts" title={sourceStatsTitle(presentation.sourceStats)}><span>in {presentation.sourceStats.imports ?? "—"}</span><span>out {presentation.sourceStats.exports ?? "—"}</span></span>}{impactDistance !== undefined && <span className="impact-distance">distance {impactDistance}</span>}</div>
     {item.expanded && <>
-      <div className="package-list-head"><span>Files</span><span className="package-list-import-label">imports</span><span className="package-list-export-label">exports</span></div>
+      <div className="package-list-head"><span>{presentation.rowGroupLabel}</span><span className="package-list-import-label">imports</span><span className="package-list-export-label">exports</span></div>
       <div className="package-file-list nodrag nopan nowheel" ref={listRef} onScroll={onListScroll}>
         <div aria-hidden="true" style={{ height: rowLayout.offsets[range.renderFirst] ?? 0 }} />
         {files.slice(range.renderFirst, range.renderLast).map(({ file, declarations }) => <div className={["package-file-row", importingFiles.has(file.id) ? "has-import" : "", supplyingFiles.has(file.id) ? "has-export" : "", !importingFiles.has(file.id) && !supplyingFiles.has(file.id) ? "is-disconnected" : "", selectedImporterID === file.id ? "is-line-importer" : "", selectedSupplierID === file.id ? "is-line-supplier" : ""].filter(Boolean).join(" ")} key={file.id} data-node-id={file.id}>
           <div className={`package-file-main ${selectedID === file.id ? "is-row-selected" : ""}`}>
-            {file.childCount > 0 && <button className="package-file-toggle nodrag nopan" type="button" onClick={(event) => { event.stopPropagation(); onToggle(file.id); }} aria-label={`${file.expanded ? "Collapse" : "Expand"} ${file.name}`}>{file.expanded ? "▾" : "▸"}</button>}
-            <button className="package-file-name nodrag nopan" type="button" title={file.path} onClick={(event) => { event.stopPropagation(); onSelect(file.id); }}>{file.name}</button>
-            <span className="package-file-counts" title={file.import_count === undefined ? "Counts unavailable for this scan" : `${file.import_count} imports, ${file.export_count ?? "unknown"} exports`}><span>{file.import_count ?? "—"}</span><span>{file.export_count ?? "—"}</span></span>
+            {file.childCount > 0 && <button className="package-file-toggle nodrag nopan" type="button" onClick={(event) => { event.stopPropagation(); onToggle(file.id); }} aria-label={`${file.expanded ? "Collapse" : "Expand"} ${file.presentation.displayName}`}>{file.expanded ? "▾" : "▸"}</button>}
+            <button className="package-file-name nodrag nopan" type="button" title={file.path} onClick={(event) => { event.stopPropagation(); onSelect(file.id); }}>{file.presentation.rowName}</button>
+            <span className="package-file-counts" title={sourceStatsTitle(file.presentation.sourceStats)}><span>{file.presentation.sourceStats.imports ?? "—"}</span><span>{file.presentation.sourceStats.exports ?? "—"}</span></span>
           </div>
-          {file.expanded && declarations.map((declaration) => <button key={declaration.id} data-node-id={declaration.id} type="button" className={`package-declaration nodrag nopan ${selectedID === declaration.id ? "is-row-selected" : ""}`} onClick={(event) => { event.stopPropagation(); onSelect(declaration.id); }} title={`${declaration.kind.toLowerCase()} ${declaration.name}`}><span>{declaration.name}</span><small>{declaration.kind.toLowerCase()}</small></button>)}
+          {file.expanded && declarations.map((declaration) => <button key={declaration.id} data-node-id={declaration.id} type="button" className={`package-declaration nodrag nopan ${selectedID === declaration.id ? "is-row-selected" : ""}`} onClick={(event) => { event.stopPropagation(); onSelect(declaration.id); }} title={`${declaration.presentation.displayKind} ${declaration.presentation.displayName}`}><span>{declaration.presentation.displayName}</span><small>{declaration.presentation.displayKind}</small></button>)}
         </div>)}
         <div aria-hidden="true" style={{ height: rowLayout.offsets[files.length] - (rowLayout.offsets[range.renderLast] ?? rowLayout.offsets[files.length]) }} />
       </div>
-      <div className="package-list-foot">{files.length ? `${range.first + 1}–${range.last} of ${files.length} files` : "No files"}</div>
+      <div className="package-list-foot">{files.length ? `${range.first + 1}–${range.last} of ${files.length} ${presentation.rowGroupLabel.toLowerCase()}` : `No ${presentation.rowGroupLabel.toLowerCase()}`}</div>
     </>}
     {item.expanded && connectedFiles.filter(({ id: fileID }) => importingFiles.has(fileID)).map(({ id: fileID }) => <Handle key={`in:${fileID}`} id={fileID} type="target" position={Position.Left} isConnectable={false} className="map-handle" style={{ top: anchors[fileID] ?? 72, left: 3 }} />)}
     {item.expanded && connectedFiles.filter(({ id: fileID }) => supplyingFiles.has(fileID)).map(({ id: fileID }) => <Handle key={`out:${fileID}`} id={fileID} type="source" position={Position.Right} isConnectable={false} className="map-handle" style={{ top: anchors[fileID] ?? 72, right: 3 }} />)}

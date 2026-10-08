@@ -11,7 +11,7 @@ export interface GraphNode {
   kind: NodeKind;
   path: string;
   name: string;
-  language?: "go" | "python";
+  language?: string;
   import_count?: number;
   export_count?: number;
 }

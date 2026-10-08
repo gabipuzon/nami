@@ -1,8 +1,9 @@
 "use client";
 
 import type { DeclarationKind, Graph, GraphNode } from "../lib/types";
+import { buildNodePresentations } from "../lib/languagePresentation";
 import { declarationKinds } from "../lib/types";
-import { searchNodes, type VisibleGraph } from "../lib/presentation";
+import { buildExplorerTree, searchNodes, type VisibleGraph } from "../lib/presentation";
 
 interface ExplorerProps {
   canonicalGraph: Graph;
@@ -18,16 +19,9 @@ interface ExplorerProps {
 
 export function Explorer(props: ExplorerProps) {
   const { canonicalGraph, visibleGraph, selectedNodeID, search, visibleDeclarationKinds, onSearch, onSelectNode, onToggle, onToggleKind } = props;
-  const packages = visibleGraph.nodes.filter((node) => node.kind === "PACKAGE");
-  const modules = visibleGraph.nodes.filter((node) => node.kind === "FILE" && !node.parentId);
+  const { packages, modules, children } = buildExplorerTree(canonicalGraph, visibleGraph);
+  const presentations = buildNodePresentations(canonicalGraph);
   const visibleByID = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
-  const children = new Map<string, GraphNode[]>();
-  for (const node of visibleGraph.nodes) {
-    if (!node.parentId) continue;
-    const siblings = children.get(node.parentId) ?? [];
-    siblings.push(node);
-    children.set(node.parentId, siblings);
-  }
   const results = searchNodes(canonicalGraph, search);
   const counts = {
     packages: canonicalGraph.nodes.filter((node) => node.kind === "PACKAGE").length,
@@ -38,15 +32,16 @@ export function Explorer(props: ExplorerProps) {
   const renderEntry = (node: GraphNode, depth: number) => {
     const item = visibleByID.get(node.id);
     if (!item) return null;
-    const expandable = item.childCount > 0 && (item.kind === "PACKAGE" || item.kind === "FILE");
+    const profile = presentations.get(item.id)!;
+    const expandable = (item.childCount > 0 || (children.get(item.id)?.length ?? 0) > 0) && profile.expansion !== undefined;
     return <div key={item.id}>
       <div className={`tree-row ${selectedNodeID === item.id ? "is-selected" : ""}`} style={{ paddingLeft: 12 + depth * 14 }}>
-        {expandable ? <button type="button" className="tree-toggle" onClick={() => onToggle(item.id)} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${item.name}`}>{item.expanded ? "▾" : "▸"}</button> : <span className="tree-spacer" />}
-        <button type="button" className="tree-label" onClick={() => onSelectNode(item.id)} title={item.kind === "PACKAGE" ? `${item.path} · package ${item.name}` : item.path}>
-          <span className="tree-label-primary">{item.kind === "PACKAGE" ? item.path : item.name}</span>
-          {item.kind === "PACKAGE" && <span className="tree-label-meta">package {item.name}</span>}
+        {expandable ? <button type="button" className="tree-toggle" onClick={() => onToggle(item.id)} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${profile.displayName}`}>{item.expanded ? "▾" : "▸"}</button> : <span className="tree-spacer" />}
+        <button type="button" className="tree-label" onClick={() => onSelectNode(item.id)} title={`${item.path} · ${profile.displayKind} ${profile.displayName}`}>
+          <span className="tree-label-primary">{profile.rowName}</span>
+          {profile.secondaryLabel && profile.expansion === "container" && <span className="tree-label-meta">{profile.secondaryLabel}</span>}
         </button>
-        {item.kind !== "PACKAGE" && <span className="tree-kind">{item.kind === "FILE" ? "F" : "·"}</span>}
+        {profile.rowMark && <span className="tree-kind">{profile.rowMark}</span>}
       </div>
       {item.expanded && (children.get(item.id) ?? []).map((child) => renderEntry(child, depth + 1))}
     </div>;
@@ -61,11 +56,11 @@ export function Explorer(props: ExplorerProps) {
         <div className="section-heading">Matches <span>{results.length}{results.length === 40 ? "+" : ""}</span></div>
         {results.length === 0 ? <p className="muted compact">No matching graph nodes</p> : results.map((node) =>
           <button key={node.id} className="search-result" type="button" onClick={() => onSelectNode(node.id)} title={node.id}>
-            <span>{node.name}</span><small>{node.kind.toLowerCase()} · {node.path}</small>
+            <span>{presentations.get(node.id)?.displayName}</span><small>{presentations.get(node.id)?.displayKind} · {node.path}</small>
           </button>
         )}
       </div>}
-      <div className="section-heading tree-heading">Packages <span>{packages.length}</span></div>
+      <div className="section-heading tree-heading">Packages <span>{counts.packages}</span></div>
       <div className="tree-list">{packages.map((pkg) => renderEntry(pkg, 0))}</div>
 
       {modules.length > 0 && <><div className="section-heading tree-heading">Modules <span>{modules.length}</span></div><div className="tree-list">{modules.map((file) => renderEntry(file, 0))}</div></>}
