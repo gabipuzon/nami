@@ -1,4 +1,4 @@
-package hierarchy
+package hierarchy_test
 
 import (
 	"reflect"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gabipuzon/nami/internal/graph"
+	"github.com/gabipuzon/nami/internal/hierarchy"
 	"github.com/gabipuzon/nami/internal/query"
 )
 
@@ -38,7 +39,7 @@ func testGraph(t *testing.T) graph.Graph {
 }
 
 func TestParentAndChildren(t *testing.T) {
-	h, err := New(testGraph(t))
+	h, err := hierarchy.New(testGraph(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,7 @@ func TestInvalidContainmentRejected(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := New(g); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := hierarchy.New(g); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("validation error = %v", err)
 			}
 		})
@@ -88,9 +89,9 @@ func TestInvalidContainmentRejected(t *testing.T) {
 func TestPackageProjectionKeepsEvidenceAndCanonicalGraph(t *testing.T) {
 	g := testGraph(t)
 	before := graph.Graph{Nodes: append([]graph.Node(nil), g.Nodes...), Edges: append([]graph.Edge(nil), g.Edges...)}
-	var first Projection
+	var first hierarchy.Projection
 	for i := 0; i < 5; i++ {
-		projection, err := ProjectPackages(g)
+		projection, err := hierarchy.ProjectPackages(g)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +109,7 @@ func TestPackageProjectionKeepsEvidenceAndCanonicalGraph(t *testing.T) {
 	}) {
 		t.Fatalf("folded graph = %+v", first.Graph)
 	}
-	if len(first.Evidence) != 2 || !reflect.DeepEqual(first.Evidence[0], Evidence{
+	if len(first.Evidence) != 2 || !reflect.DeepEqual(first.Evidence[0], hierarchy.Evidence{
 		Edge: graph.Edge{Kind: graph.Imports, From: "A", To: "B"},
 		Sources: []graph.Edge{
 			{Kind: graph.Imports, From: "a.go", To: "B"},
@@ -147,7 +148,7 @@ func TestOldGraphWithoutModulesCanStillFold(t *testing.T) {
 		}
 	}
 	old := graph.Graph{Nodes: nodes, Edges: edges}
-	projection, err := ProjectPackages(old)
+	projection, err := hierarchy.ProjectPackages(old)
 	if err != nil || len(projection.Graph.Edges) != 2 {
 		t.Fatalf("old graph projection = %+v, %v", projection, err)
 	}
@@ -155,7 +156,7 @@ func TestOldGraphWithoutModulesCanStillFold(t *testing.T) {
 
 func TestDeclarationHierarchyAndProjection(t *testing.T) {
 	base := testGraph(t)
-	before, err := ProjectPackages(base)
+	before, err := hierarchy.ProjectPackages(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +165,7 @@ func TestDeclarationHierarchyAndProjection(t *testing.T) {
 		base.Nodes = append(base.Nodes, graph.Node{ID: id, Kind: kind})
 		base.Edges = append(base.Edges, graph.Edge{Kind: graph.Contains, From: "a.go", To: id})
 	}
-	h, err := New(base)
+	h, err := hierarchy.New(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,12 +173,12 @@ func TestDeclarationHierarchyAndProjection(t *testing.T) {
 	if err != nil || len(children) != 7 {
 		t.Fatalf("declaration children = %v, %v", children, err)
 	}
-	after, err := ProjectPackages(base)
+	after, err := hierarchy.ProjectPackages(base)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("package projection changed: %+v, %v", after, err)
 	}
 	bad := graph.Graph{Nodes: []graph.Node{{ID: "A", Kind: graph.Package}, {ID: "F", Kind: graph.Function}}, Edges: []graph.Edge{{Kind: graph.Contains, From: "A", To: "F"}}}
-	if _, err := New(bad); err == nil || !strings.Contains(err.Error(), "invalid containment") {
+	if _, err := hierarchy.New(bad); err == nil || !strings.Contains(err.Error(), "invalid containment") {
 		t.Fatalf("invalid containment accepted: %v", err)
 	}
 }

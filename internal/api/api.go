@@ -70,6 +70,8 @@ type affectedJSON struct {
 type handler struct {
 	snapshot storage.Snapshot
 	nodes    map[string]graph.Node
+	view     *query.ViewIndex
+	viewErr  error
 }
 
 // NewHandler serves one already loaded snapshot and never accesses its store.
@@ -78,13 +80,14 @@ func NewHandler(snapshot storage.Snapshot) http.Handler {
 	for _, node := range snapshot.Result.Graph.Nodes {
 		nodes[node.ID] = node
 	}
-	return &handler{snapshot: snapshot, nodes: nodes}
+	view, err := query.NewViewIndex(snapshot.Result.Graph)
+	return &handler{snapshot: snapshot, nodes: nodes, view: view, viewErr: err}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/api/v1/health", "/api/v1/scan", "/api/v1/graph", "/api/v1/packages",
-		"/api/v1/symbols", "/api/v1/dependencies", "/api/v1/dependents", "/api/v1/path", "/api/v1/impact":
+	case "/api/v1/overview", "/api/v1/children", "/api/v1/search", "/api/v1/inspect", "/api/v1/file-detail", "/api/v1/package-detail", "/api/v1/health", "/api/v1/scan", "/api/v1/graph", "/api/v1/packages",
+		"/api/v1/relationship-facts", "/api/v1/evidence", "/api/v1/source-status", "/api/v1/neighborhood", "/api/v1/symbols", "/api/v1/dependencies", "/api/v1/dependents", "/api/v1/path", "/api/v1/impact":
 	default:
 		writeError(w, http.StatusNotFound, "route_not_found", "API route not found")
 		return
@@ -99,7 +102,21 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Nami-Snapshot", h.snapshot.ID)
+	if expected := r.Header.Get("X-Nami-Snapshot"); expected != "" && expected != h.snapshot.ID {
+		writeError(w, 409, "snapshot_changed", "snapshot changed; reload the map")
+		return
+	}
 	switch r.URL.Path {
+	case "/api/v1/overview", "/api/v1/children", "/api/v1/search", "/api/v1/inspect", "/api/v1/file-detail", "/api/v1/package-detail":
+		h.viewRoute(w, params, r.URL.Path[len("/api/v1/"):])
+	case "/api/v1/relationship-facts":
+		h.relationshipFacts(w, params)
+	case "/api/v1/evidence":
+		h.evidence(w, params)
+	case "/api/v1/source-status":
+		h.sourceStatus(w, params)
 	case "/api/v1/health":
 		writeJSON(w, http.StatusOK, struct {
 			Status string `json:"status"`
@@ -126,6 +143,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Graph    graphJSON      `json:"graph"`
 			Evidence []evidenceJSON `json:"evidence"`
 		}{convertGraph(projection.Graph), evidence})
+	case "/api/v1/neighborhood":
+		h.neighborhood(w, params)
 	case "/api/v1/symbols":
 		h.symbols(w, params)
 	case "/api/v1/dependencies":
@@ -147,19 +166,20 @@ func (h *handler) scan(w http.ResponseWriter) {
 		issues = append(issues, convertIssue(issue))
 	}
 	writeJSON(w, http.StatusOK, struct {
-		ID        string       `json:"id"`
-		Root      string       `json:"root"`
-		CreatedAt string       `json:"created_at"`
-		Status    string       `json:"status"`
-		Coverage  coverageJSON `json:"coverage"`
-		Issues    []issueJSON  `json:"issues"`
+		ID         string               `json:"id"`
+		Root       string               `json:"root"`
+		CreatedAt  string               `json:"created_at"`
+		Status     string               `json:"status"`
+		Coverage   coverageJSON         `json:"coverage"`
+		Issues     []issueJSON          `json:"issues"`
+		Exclusions []analysis.Exclusion `json:"exclusions"`
 	}{s.ID, s.Root, s.CreatedAt.Format(time.RFC3339Nano), s.Status, coverageJSON{
 		FilesDiscovered: c.FilesDiscovered, SupportedSourceFiles: c.SupportedSourceFiles,
 		FilesAnalyzed: c.FilesAnalyzed, FilesSkipped: c.FilesSkipped, FilesFailed: c.FilesFailed,
 		ImportsDiscovered: c.ImportsDiscovered, InternalImportsResolved: c.InternalResolved,
 		StandardLibraryImports: c.StandardLibrary, ExternalImports: c.External,
 		UnresolvedImports: c.Unresolved, CgoImports: c.Cgo, UnclassifiedImports: c.Unclassified,
-	}, issues})
+	}, issues, append([]analysis.Exclusion{}, s.Result.Exclusions...)})
 }
 
 func (h *handler) symbols(w http.ResponseWriter, params map[string][]string) {
@@ -268,7 +288,8 @@ func (h *handler) impact(w http.ResponseWriter, params map[string][]string) {
 		Graph          graphJSON      `json:"graph"`
 		CoverageStatus string         `json:"coverage_status"`
 		Incomplete     bool           `json:"incomplete"`
-	}{id, affected, convertGraph(result.Graph), h.snapshot.Status, h.snapshot.Status != "complete"})
+		ExcludedPaths  int            `json:"excluded_paths"`
+	}{id, affected, convertGraph(result.Graph), h.snapshot.Status, h.snapshot.Status != "complete", len(h.snapshot.Result.Exclusions)})
 }
 
 func (h *handler) requireNode(w http.ResponseWriter, id string, kind graph.NodeKind) bool {
