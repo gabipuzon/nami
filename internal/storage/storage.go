@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 type Store struct {
 	db      *sql.DB
@@ -117,7 +117,7 @@ func (s *Store) initialize() error {
 	if version == schemaVersion {
 		return nil
 	}
-	if version == 1 || version == 2 {
+	if version >= 1 && version <= 3 {
 		tx, err := s.db.Begin()
 		if err != nil {
 			return fmt.Errorf("migrate store: %w", err)
@@ -127,7 +127,10 @@ func (s *Store) initialize() error {
 		if version == 1 {
 			statements = append(statements, `ALTER TABLE nodes ADD COLUMN import_count INTEGER`, `ALTER TABLE nodes ADD COLUMN export_count INTEGER`)
 		}
-		statements = append(statements, `ALTER TABLE nodes ADD COLUMN language TEXT`, `PRAGMA user_version = 3`)
+		if version < 3 {
+			statements = append(statements, `ALTER TABLE nodes ADD COLUMN language TEXT`)
+		}
+		statements = append(statements, evidenceTable, `PRAGMA user_version = 4`)
 		for _, statement := range statements {
 			if _, err := tx.Exec(statement); err != nil {
 				return fmt.Errorf("migrate store schema: %w", err)
@@ -168,7 +171,8 @@ func (s *Store) initialize() error {
 			path TEXT NOT NULL, import_path TEXT NOT NULL, reason TEXT NOT NULL,
 			PRIMARY KEY (scan_id, ordinal), FOREIGN KEY (scan_id) REFERENCES snapshots(id)
 		)`,
-		`PRAGMA user_version = 3`,
+		evidenceTable,
+		`PRAGMA user_version = 4`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize store schema: %w", err)
@@ -227,6 +231,16 @@ func (s *Store) Save(root string, result analysis.Result) (Summary, error) {
 		if _, err := tx.Exec(`INSERT INTO issues VALUES (?,?,?,?,?,?)`, summary.ID, i, issue.Kind, issue.Path, issue.Import, issue.Reason); err != nil {
 			return Summary{}, fmt.Errorf("save analysis issue: %w", err)
 		}
+	}
+	// Scope facts share the existing diagnostic record format, but stay separate
+	// from analysis issues and do not change the saved coverage status.
+	for i, excluded := range result.Exclusions {
+		if _, err := tx.Exec(`INSERT INTO issues VALUES (?,?,?,?,?,?)`, summary.ID, len(result.Issues)+i, "EXCLUDED_PATH", excluded.Path, "", excluded.Reason); err != nil {
+			return Summary{}, fmt.Errorf("save scan exclusion: %w", err)
+		}
+	}
+	if err := saveEvidence(tx, summary.ID, result.SourceEvidence); err != nil {
+		return Summary{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Summary{}, fmt.Errorf("commit snapshot: %w", err)
@@ -344,12 +358,22 @@ func (s *Store) Load(id string) (Snapshot, error) {
 			issues.Close()
 			return Snapshot{}, fmt.Errorf("read analysis issue: %w", err)
 		}
-		snap.Result.Issues = append(snap.Result.Issues, issue)
+		if issue.Kind == "EXCLUDED_PATH" {
+			snap.Result.Exclusions = append(snap.Result.Exclusions, analysis.Exclusion{Path: issue.Path, Reason: issue.Reason})
+		} else {
+			snap.Result.Issues = append(snap.Result.Issues, issue)
+		}
 	}
 	err = issues.Err()
 	issues.Close()
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load analysis issues: %w", err)
+	}
+	if s.version >= 4 {
+		snap.Result.SourceEvidence, err = loadEvidence(s.db, id)
+		if err != nil {
+			return Snapshot{}, err
+		}
 	}
 	return snap, nil
 }

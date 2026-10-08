@@ -16,6 +16,7 @@ import (
 	"github.com/gabipuzon/nami/internal/graph"
 	"github.com/gabipuzon/nami/internal/hierarchy"
 	"github.com/gabipuzon/nami/internal/impact"
+	"github.com/gabipuzon/nami/internal/query"
 	"github.com/gabipuzon/nami/internal/storage"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -167,7 +168,7 @@ func TestDiscoveryAndScanInfo(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"nami_dependency_path", "nami_file_symbols", "nami_inspect_node", "nami_package_dependencies", "nami_package_dependents", "nami_package_impact", "nami_scan_info", "nami_search_nodes"}
+	want := []string{"nami_dependency_path", "nami_file_symbols", "nami_inspect_node", "nami_package_dependencies", "nami_package_dependents", "nami_package_impact", "nami_scan_info", "nami_search_nodes", "nami_source_evidence"}
 	if !reflect.DeepEqual(names, want) || listed.NextCursor != "" {
 		t.Fatalf("tools = %v", names)
 	}
@@ -562,5 +563,21 @@ func TestPythonSnapshotTools(t *testing.T) {
 	}](t, call(t, ctx, cs, "nami_dependency_path", map[string]any{"from_id": "file:users/service.py", "to_id": "file:users/models.py", "scope": "canonical"}))
 	if !dependency.Found || !reflect.DeepEqual(dependency.Path, []string{"file:users/service.py", "file:users/models.py"}) {
 		t.Fatalf("dependency: %+v", dependency)
+	}
+}
+
+func TestSourceEvidenceToolUsesSavedOccurrencesAndOwnsCopies(t *testing.T) {
+	snapshot := fixture(t)
+	fact := graph.SourceEvidence{Edge: graph.Edge{Kind: graph.Imports, From: fileA, To: packageB}, Path: "a/a.go", Line: 2, Snippet: "saved import", Hash: "saved hash"}
+	snapshot.Result.SourceEvidence = []graph.SourceEvidence{fact}
+	server, err := New(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Result.SourceEvidence[0].Snippet = "caller changed"
+	ctx, client := connect(t, server)
+	result := decode[query.EvidencePage](t, call(t, ctx, client, "nami_source_evidence", map[string]any{"from": packageA, "to": packageB, "kind": "IMPORTS", "scope": "package"}))
+	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].Snippet != "saved import" {
+		t.Fatal(result)
 	}
 }

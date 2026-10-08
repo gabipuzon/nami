@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gabipuzon/nami/internal/analysis"
 	"github.com/gabipuzon/nami/internal/graph"
 	"github.com/gabipuzon/nami/internal/storage"
 )
@@ -52,12 +53,13 @@ type issueJSON struct {
 }
 
 type scanInfoJSON struct {
-	ID        string       `json:"id"`
-	Root      string       `json:"root"`
-	CreatedAt string       `json:"created_at"`
-	Status    string       `json:"status"`
-	Coverage  coverageJSON `json:"coverage"`
-	Issues    []issueJSON  `json:"issues"`
+	ID         string               `json:"id"`
+	Root       string               `json:"root"`
+	CreatedAt  string               `json:"created_at"`
+	Status     string               `json:"status"`
+	Coverage   coverageJSON         `json:"coverage"`
+	Issues     []issueJSON          `json:"issues"`
+	Exclusions []analysis.Exclusion `json:"exclusions"`
 }
 
 func scanInfo(snapshot storage.Snapshot) scanInfoJSON {
@@ -70,7 +72,7 @@ func scanInfo(snapshot storage.Snapshot) scanInfoJSON {
 		ID: snapshot.ID, Root: snapshot.Root, CreatedAt: snapshot.CreatedAt.Format(time.RFC3339Nano), Status: snapshot.Status,
 		Coverage: coverageJSON{c.FilesDiscovered, c.SupportedSourceFiles, c.FilesAnalyzed, c.FilesSkipped, c.FilesFailed,
 			c.ImportsDiscovered, c.InternalResolved, c.StandardLibrary, c.External, c.Unresolved, c.Cgo, c.Unclassified},
-		Issues: issues,
+		Issues: issues, Exclusions: append([]analysis.Exclusion{}, snapshot.Result.Exclusions...),
 	}
 }
 

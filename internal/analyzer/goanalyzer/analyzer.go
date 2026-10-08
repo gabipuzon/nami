@@ -36,14 +36,17 @@ type ImportCounts struct {
 }
 
 type Result struct {
-	Fragment      graph.Fragment
-	Issues        []Issue
-	FilesAnalyzed int
-	FilesFailed   int
-	Imports       ImportCounts
+	SourceEvidence []graph.SourceEvidence
+	Fragment       graph.Fragment
+	Issues         []Issue
+	FilesAnalyzed  int
+	FilesFailed    int
+	Imports        ImportCounts
 }
 
 type sourceFile struct {
+	content     []byte
+	hash        string
 	path        string
 	file        *ast.File
 	fset        *token.FileSet
@@ -53,6 +56,7 @@ type sourceFile struct {
 }
 
 type sourceImport struct {
+	node  *ast.ImportSpec
 	path  string
 	alias string
 }
@@ -84,7 +88,23 @@ type workspaceState struct {
 }
 
 func Analyze(root string, goFiles, scannedFiles []string) Result {
+	return AnalyzeWithExclusions(root, goFiles, scannedFiles, nil)
+}
+
+func AnalyzeWithExclusions(root string, goFiles, scannedFiles, exclusions []string) Result {
+	var overlay string
+	var overlayErr error
+	if len(goFiles) > 0 {
+		overlay, overlayErr = exclusionOverlay(root, exclusions)
+	}
+	if overlay != "" {
+		defer os.Remove(overlay)
+	}
+
 	modules, issues := loadModules(root, scannedFiles)
+	if overlayErr != nil {
+		issues = append(issues, Issue{Kind: "IMPORT_CLASSIFICATION_ERROR", Path: ".", Reason: overlayErr.Error()})
+	}
 	standard := make(map[string]bool)
 	var stdErr error
 	if len(goFiles) > 0 {
@@ -163,10 +183,10 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 			if imp.Name != nil {
 				alias = imp.Name.Name
 			}
-			imports = append(imports, sourceImport{path: importPath, alias: alias})
+			imports = append(imports, sourceImport{path: importPath, alias: alias, node: imp})
 		}
 		mod, moduleKnown := containingModule(dir, modules)
-		parsed = append(parsed, sourceFile{path: rel, file: file, fset: fset, imports: imports, moduleKnown: moduleKnown, module: mod})
+		parsed = append(parsed, sourceFile{hash: graph.SourceHash(content), content: content, path: rel, file: file, fset: fset, imports: imports, moduleKnown: moduleKnown, module: mod})
 		if moduleKnown {
 			result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Contains, From: moduleID(mod), To: packageID})
 		}
@@ -196,7 +216,12 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 				issues = append(issues, Issue{Kind: "UNCLASSIFIED_IMPORT", Path: file.path, Import: importPath, Reason: "repository module path unavailable"})
 				continue
 			}
-			lookup := resolveLocalPackage(root, file.module, importPath, packageLookups, workspaceStates)
+			lookup := packageLookup{}
+			if overlayErr != nil {
+				lookup.reason = overlayErr.Error()
+			} else {
+				lookup = resolveLocalPackage(root, file.module, importPath, packageLookups, workspaceStates, overlay)
+			}
 			if lookup.metadataUnavailable {
 				lookup = sameModulePackage(root, file.module, importPath, modules, workspaceStates)
 			}
@@ -211,6 +236,7 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 				if len(targets) == 1 {
 					result.Imports.InternalResolved++
 					result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Imports, From: "file:" + file.path, To: targets[0]})
+					result.SourceEvidence = append(result.SourceEvidence, sourceEvidence(file, imp.node, graph.Edge{Kind: graph.Imports, From: "file:" + file.path, To: targets[0]}))
 					alias := imp.alias
 					if alias == "" {
 						alias = packages[targets[0]].Name
@@ -269,8 +295,9 @@ func Analyze(root string, goFiles, scannedFiles []string) Result {
 		uses := typeCheckImportUses(file.file, file.fset, packageNamesByPath)
 		for alias, imports := range resolvedAliases {
 			if len(imports) == 1 {
-				edges, unresolved := exportUseEdges(file.file, file.path, alias, imports[0].path, uses, exportsByPackage[imports[0].target])
+				edges, evidence, unresolved := exportUseEdges(file, alias, imports[0].path, uses, exportsByPackage[imports[0].target])
 				result.Fragment.Edges = append(result.Fragment.Edges, edges...)
+				result.SourceEvidence = append(result.SourceEvidence, evidence...)
 				for _, name := range unresolved {
 					issues = append(issues, Issue{Kind: "UNRESOLVED_EXPORT_SOURCE", Path: file.path, Import: imports[0].path, Reason: fmt.Sprintf("qualified reference %s.%s has no unique exported declaration in analyzed files", alias, name)})
 				}
@@ -300,11 +327,12 @@ func moduleID(mod module) string {
 
 // exportUseEdges records only qualified references bound to an import and one
 // unambiguous exported declaration in the analyzed target package.
-func exportUseEdges(file *ast.File, sourcePath, alias, importPath string, uses map[*ast.Ident]types.Object, exported map[string][]string) ([]graph.Edge, []string) {
+func exportUseEdges(file sourceFile, alias, importPath string, uses map[*ast.Ident]types.Object, exported map[string][]string) ([]graph.Edge, []graph.SourceEvidence, []string) {
+	var evidence []graph.SourceEvidence
 	var edges []graph.Edge
 	var unresolved []string
 	seenUnresolved := make(map[string]bool)
-	ast.Inspect(file, func(node ast.Node) bool {
+	ast.Inspect(file.file, func(node ast.Node) bool {
 		selector, ok := node.(*ast.SelectorExpr)
 		if !ok {
 			return true
@@ -319,14 +347,16 @@ func exportUseEdges(file *ast.File, sourcePath, alias, importPath string, uses m
 		}
 		providers := exported[selector.Sel.Name]
 		if len(providers) == 1 {
-			edges = append(edges, graph.Edge{Kind: graph.UsesExport, From: "file:" + sourcePath, To: providers[0]})
+			edge := graph.Edge{Kind: graph.UsesExport, From: "file:" + file.path, To: providers[0]}
+			edges = append(edges, edge)
+			evidence = append(evidence, sourceEvidence(file, selector, edge))
 		} else if !seenUnresolved[selector.Sel.Name] {
 			unresolved = append(unresolved, selector.Sel.Name)
 			seenUnresolved[selector.Sel.Name] = true
 		}
 		return true
 	})
-	return edges, unresolved
+	return edges, evidence, unresolved
 }
 
 type sourceImporter struct {
@@ -474,7 +504,7 @@ func hasImportPrefix(importPath, modulePath string) bool {
 	return importPath == modulePath || strings.HasPrefix(importPath, modulePath+"/")
 }
 
-func resolveLocalPackage(root string, source module, importPath string, cache map[string]packageLookup, workspaces map[string]workspaceState) packageLookup {
+func resolveLocalPackage(root string, source module, importPath string, cache map[string]packageLookup, workspaces map[string]workspaceState, overlay string) packageLookup {
 	key := source.dir + "\x00" + importPath
 	if lookup, ok := cache[key]; ok {
 		return lookup
@@ -486,7 +516,12 @@ func resolveLocalPackage(root string, source module, importPath string, cache ma
 	if workspace.active && !workspace.sourceIncluded {
 		return packageLookup{reason: "source module is not included in active Go workspace"}
 	}
-	command := exec.Command("go", "list", "-e", "-json", "-mod=readonly", importPath)
+	args := []string{"list", "-e", "-json", "-mod=readonly"}
+	if overlay != "" {
+		args = append(args, "-overlay", overlay)
+	}
+	args = append(args, importPath)
+	command := exec.Command("go", args...)
 	command.Dir = filepath.Join(root, filepath.FromSlash(source.dir))
 	command.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
 	output, err := command.Output()

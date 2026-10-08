@@ -133,7 +133,7 @@ func TestUnsupportedSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec("PRAGMA user_version = 4"); err != nil {
+	if _, err := store.db.Exec("PRAGMA user_version = 5"); err != nil {
 		t.Fatal(err)
 	}
 	store.Close()
@@ -156,6 +156,7 @@ func TestVersionOneStoreMigrationPreservesUnknownCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE source_evidence`,
 		`ALTER TABLE nodes DROP COLUMN language`,
 		`ALTER TABLE nodes DROP COLUMN import_count`,
 		`ALTER TABLE nodes DROP COLUMN export_count`,
@@ -349,7 +350,7 @@ func TestVersionTwoLanguageMigrationAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{"ALTER TABLE nodes DROP COLUMN language", "PRAGMA user_version = 2"} {
+	for _, statement := range []string{"DROP TABLE source_evidence", "ALTER TABLE nodes DROP COLUMN language", "PRAGMA user_version = 2"} {
 		if _, err := store.db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}

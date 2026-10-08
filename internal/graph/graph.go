@@ -51,9 +51,9 @@ type Node struct {
 }
 
 type Edge struct {
-	Kind EdgeKind
-	From string
-	To   string
+	Kind EdgeKind `json:"kind"`
+	From string   `json:"from"`
+	To   string   `json:"to"`
 }
 
 type Fragment struct {

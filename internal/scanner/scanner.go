@@ -22,6 +22,7 @@ type Result struct {
 	Discovered int
 	Files      []string
 	Skipped    []Skipped
+	Exclusions []Skipped
 }
 
 // Scan discovers regular files without interpreting their contents.
@@ -34,23 +35,44 @@ func Scan(root string) (Result, error) {
 		return Result{}, fmt.Errorf("scan %q: not a directory", root)
 	}
 
+	rules, err := loadIgnore(root)
+	if err != nil {
+		return Result{}, err
+	}
 	result := Result{}
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() {
-			if path != root && ignoredDirectories[entry.Name()] {
-				return filepath.SkipDir
-			}
+		if path == root {
 			return nil
 		}
-		result.Discovered++
+		if entry.IsDir() && ignoredDirectories[entry.Name()] {
+			return filepath.SkipDir
+		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if rel == ignoreFile {
+			return nil
+		}
+		if rule := exclusionFor(rules, rel, entry.IsDir()); rule != nil {
+			reportedPath := rel
+			if entry.IsDir() {
+				reportedPath += "/"
+			}
+			result.Exclusions = append(result.Exclusions, Skipped{Path: reportedPath, Reason: fmt.Sprintf("%s:%d pattern %q", ignoreFile, rule.line, rule.pattern)})
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		result.Discovered++
 		if !entry.Type().IsRegular() {
 			result.Skipped = append(result.Skipped, Skipped{Path: rel, Reason: "not a regular file"})
 			return nil
@@ -63,5 +85,6 @@ func Scan(root string) (Result, error) {
 	}
 	sort.Strings(result.Files)
 	sort.Slice(result.Skipped, func(i, j int) bool { return result.Skipped[i].Path < result.Skipped[j].Path })
+	sort.Slice(result.Exclusions, func(i, j int) bool { return result.Exclusions[i].Path < result.Exclusions[j].Path })
 	return result, nil
 }

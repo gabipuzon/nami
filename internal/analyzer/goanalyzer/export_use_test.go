@@ -18,7 +18,13 @@ func TestExportUseRequiresImportBindingAndUniqueProvider(t *testing.T) {
 			t.Fatal(err)
 		}
 		uses := typeCheckImportUses(file, fset, map[string]string{"example.com/dep": "dep"})
-		edges, _ := exportUseEdges(file, "consumer.go", "dep", "example.com/dep", uses, map[string][]string{"Name": {"file:provider.go"}})
+		edges, evidence, _ := exportUseEdges(sourceFile{file: file, path: "consumer.go", fset: fset, content: []byte(source), hash: graph.SourceHash([]byte(source))}, "dep", "example.com/dep", uses, map[string][]string{"Name": {"file:provider.go"}})
+		if len(evidence) != len(edges) {
+			t.Fatal("source occurrences do not match proven edges")
+		}
+		if len(evidence) > 0 && (evidence[0].Snippet != "dep.Name" || evidence[0].Line != 3) {
+			t.Fatal(evidence)
+		}
 		return edges
 	}
 	want := []graph.Edge{{Kind: graph.UsesExport, From: "file:consumer.go", To: "file:provider.go"}}
@@ -34,7 +40,7 @@ func TestExportUseRequiresImportBindingAndUniqueProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	uses := typeCheckImportUses(file, fset, map[string]string{"example.com/dep": "dep"})
-	if got, unresolved := exportUseEdges(file, "consumer.go", "dep", "example.com/dep", uses, map[string][]string{"Name": {"file:first.go", "file:second.go"}}); len(got) != 0 || !reflect.DeepEqual(unresolved, []string{"Name"}) {
+	if got, evidence, unresolved := exportUseEdges(sourceFile{file: file, path: "consumer.go", fset: fset}, "dep", "example.com/dep", uses, map[string][]string{"Name": {"file:first.go", "file:second.go"}}); len(got) != 0 || len(evidence) != 0 || !reflect.DeepEqual(unresolved, []string{"Name"}) {
 		t.Fatalf("ambiguous export created evidence: %+v, unresolved=%+v", got, unresolved)
 	}
 }

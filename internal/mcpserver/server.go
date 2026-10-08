@@ -50,6 +50,8 @@ func New(snapshot storage.Snapshot) (*mcp.Server, error) {
 	snapshot.Result.Graph.Nodes = slices.Clone(snapshot.Result.Graph.Nodes)
 	snapshot.Result.Graph.Edges = slices.Clone(snapshot.Result.Graph.Edges)
 	snapshot.Result.Issues = slices.Clone(snapshot.Result.Issues)
+	snapshot.Result.Exclusions = slices.Clone(snapshot.Result.Exclusions)
+	snapshot.Result.SourceEvidence = slices.Clone(snapshot.Result.SourceEvidence)
 	tree, err := hierarchy.New(snapshot.Result.Graph)
 	if err != nil {
 		return nil, fmt.Errorf("load snapshot hierarchy: %w", err)
@@ -63,9 +65,9 @@ func New(snapshot storage.Snapshot) (*mcp.Server, error) {
 		s.nodes[node.ID] = node
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "nami", Version: "dev"}, &mcp.ServerOptions{
-		Instructions: "Read-only facts from one saved nami snapshot. Check nami_scan_info for analysis gaps. Impact means potential dependency reachability, not guaranteed breakage. USES_EXPORT is a stored file relationship, not a call graph.",
+		Instructions: "Read-only facts from one saved nami snapshot. Check nami_scan_info for analysis gaps and intentional scan exclusions. Complete coverage describes the included scan scope. Impact means potential dependency reachability, not guaranteed breakage. USES_EXPORT is a stored file relationship, not a call graph.",
 	})
-	addTool(server, "nami_scan_info", "Describe the loaded snapshot, stored coverage, and analysis gaps.", inputSchema(nil), func(noArgs) (any, error) {
+	addTool(server, "nami_scan_info", "Describe the loaded snapshot, stored coverage, analysis gaps and intentional exclusions.", inputSchema(nil), func(noArgs) (any, error) {
 		return scanInfo(s.snapshot), nil
 	})
 	addTool(server, "nami_search_nodes", "Find saved nodes by case-insensitive substring in name, path, or ID. Ordered by name then ID; default limit 20, maximum 100.", inputSchema(map[string]any{
@@ -83,6 +85,16 @@ func New(snapshot storage.Snapshot) (*mcp.Server, error) {
 	}, "from_id", "to_id", "scope"), s.path)
 	addTool(server, "nami_file_symbols", "Return only persisted declaration nodes directly owned by a FILE.", inputSchema(map[string]any{"file_id": stringProperty("Exact FILE node ID.")}, "file_id"), s.symbols)
 	addTool(server, "nami_package_impact", "Return potentially affected packages through known dependency reachability, distances, impact graph, and coverage status. Does not predict definite breakage.", packageSchema, s.packageImpact)
+	addTool(server, "nami_source_evidence", "Read saved source occurrences for an exact canonical or package relationship, paged at 20. Does not read current source.", inputSchema(map[string]any{
+		"from": stringProperty("Saved source node ID."), "to": stringProperty("Saved target node ID."), "kind": stringProperty("Saved relationship kind."),
+		"scope": map[string]any{"type": "string", "enum": []string{"canonical", "package"}}, "offset": map[string]any{"type": "integer", "minimum": 0},
+	}, "from", "to", "kind", "scope"), func(args evidenceArgs) (any, error) {
+		page, err := query.SelectEvidence(s.snapshot.Result.Graph, s.snapshot.Result.SourceEvidence, graph.Edge{Kind: args.Kind, From: args.From, To: args.To}, args.Scope, args.Offset)
+		if err != nil {
+			return nil, &toolError{"invalid_argument", err.Error()}
+		}
+		return page, nil
+	})
 	return server, nil
 }
 
@@ -288,7 +300,8 @@ func (s *snapshotServer) packageImpact(args packageArgs) (any, error) {
 		Graph          graphJSON      `json:"graph"`
 		CoverageStatus string         `json:"coverage_status"`
 		Incomplete     bool           `json:"incomplete"`
-	}{convertNode(node), affected, convertGraph(result.Graph), s.snapshot.Status, s.snapshot.Status != "complete"}, nil
+		ExcludedPaths  int            `json:"excluded_paths"`
+	}{convertNode(node), affected, convertGraph(result.Graph), s.snapshot.Status, s.snapshot.Status != "complete", len(s.snapshot.Result.Exclusions)}, nil
 }
 
 type toolError struct {
@@ -374,4 +387,12 @@ func addTool[In any](server *mcp.Server, name, description string, schema map[st
 		output, err := handle(args)
 		return toolResult(output, err), nil
 	})
+}
+
+type evidenceArgs struct {
+	From   string         `json:"from"`
+	To     string         `json:"to"`
+	Kind   graph.EdgeKind `json:"kind"`
+	Scope  string         `json:"scope"`
+	Offset int            `json:"offset"`
 }

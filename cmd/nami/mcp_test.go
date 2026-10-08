@@ -91,7 +91,7 @@ func TestMCPStdioProtocolAndShutdown(t *testing.T) {
 			}
 			defer session.Close()
 			tools, err := session.ListTools(ctx, nil)
-			if err != nil || len(tools.Tools) != 8 {
+			if err != nil || len(tools.Tools) != 9 {
 				t.Fatalf("stdio discovery = %+v, %v", tools, err)
 			}
 			info, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "nami_scan_info"})

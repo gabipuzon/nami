@@ -13,9 +13,16 @@ import (
 )
 
 type Result struct {
-	Graph    graph.Graph
-	Coverage Coverage
-	Issues   []Issue
+	SourceEvidence []graph.SourceEvidence
+	Graph          graph.Graph
+	Coverage       Coverage
+	Issues         []Issue
+	Exclusions     []Exclusion
+}
+
+type Exclusion struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 type Coverage struct {
@@ -57,7 +64,11 @@ func Map(root string) (Result, error) {
 		skippedPaths = append(skippedPaths, skipped.Path)
 	}
 	unsupported := detect.UnsupportedSources(scan.Files)
-	goResult := goanalyzer.Analyze(absRoot, goFiles, scan.Files)
+	var excludedPaths []string
+	for _, excluded := range scan.Exclusions {
+		excludedPaths = append(excludedPaths, excluded.Path)
+	}
+	goResult := goanalyzer.AnalyzeWithExclusions(absRoot, goFiles, scan.Files, excludedPaths)
 	pythonResult := pythonanalyzer.Analyze(absRoot, pythonFiles)
 	graph, err := graph.Build(goResult.Fragment, pythonResult.Fragment)
 	if err != nil {
@@ -107,5 +118,29 @@ func Map(root string) (Result, error) {
 	if len(issues) > 0 {
 		coverage.Status = "completed_with_gaps"
 	}
-	return Result{Graph: graph, Coverage: coverage, Issues: issues}, nil
+	var exclusions []Exclusion
+	for _, excluded := range scan.Exclusions {
+		exclusions = append(exclusions, Exclusion{Path: excluded.Path, Reason: excluded.Reason})
+	}
+	evidence := append(goResult.SourceEvidence, pythonResult.SourceEvidence...)
+	sort.SliceStable(evidence, func(i, j int) bool {
+		a, b := evidence[i], evidence[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		if a.Column != b.Column {
+			return a.Column < b.Column
+		}
+		if a.Edge.Kind != b.Edge.Kind {
+			return a.Edge.Kind < b.Edge.Kind
+		}
+		if a.Edge.To != b.Edge.To {
+			return a.Edge.To < b.Edge.To
+		}
+		return a.Snippet < b.Snippet
+	})
+	return Result{SourceEvidence: evidence, Graph: graph, Coverage: coverage, Issues: issues, Exclusions: exclusions}, nil
 }

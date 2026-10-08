@@ -20,14 +20,20 @@ var helper string
 type Issue struct{ Kind, Path, Import, Reason string }
 type ImportCounts struct{ Discovered, InternalResolved, StandardLibrary, External, Unresolved, Unclassified int }
 type Result struct {
+	SourceEvidence             []graph.SourceEvidence
 	Fragment                   graph.Fragment
 	Issues                     []Issue
 	FilesAnalyzed, FilesFailed int
 	Imports                    ImportCounts
 }
 type importFact struct {
-	Module, Name string
-	Level, Line  int
+	Module, Name  string
+	Level, Line   int
+	Column        int
+	EndLine       int `json:"end_line"`
+	EndColumn     int `json:"end_column"`
+	Snippet, Hash string
+	Truncated     bool
 }
 type declaration struct {
 	Kind graph.NodeKind
@@ -218,6 +224,7 @@ func build(parsed response, rootName string) Result {
 			if reason == "" && len(candidates) == 1 {
 				result.Imports.InternalResolved++
 				result.Fragment.Edges = append(result.Fragment.Edges, graph.Edge{Kind: graph.Imports, From: "file:" + rel, To: candidates[0]})
+				result.SourceEvidence = append(result.SourceEvidence, graph.SourceEvidence{Edge: graph.Edge{Kind: graph.Imports, From: "file:" + rel, To: candidates[0]}, Path: rel, Line: fact.Line, Column: fact.Column, EndLine: fact.EndLine, EndColumn: fact.EndColumn, Snippet: fact.Snippet, Hash: fact.Hash, Truncated: fact.Truncated})
 				continue
 			}
 			if reason == "" && len(candidates) > 1 {
