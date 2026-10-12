@@ -6,7 +6,7 @@ import { setPerformanceCount } from "../lib/performance";
 import { loadNeighborhood } from "../lib/api";
 import { backFocus, pushFocus, neighborhoodGraph, RequestGeneration, type FocusEntry } from "../lib/navigation";
 import { layoutVisibleGraph } from "../lib/layout";
-import { readableViewport,fitAllViewport,type CardRect } from "../lib/viewport";
+import { useViewCamera } from "../lib/useViewCamera";
 import { synchronizeNodes } from "../lib/flowState";
 import type { GraphNode, LoadedData } from "../lib/types";
 import { presentationFor, type NodePresentation } from "../lib/languagePresentation";
@@ -33,7 +33,6 @@ interface FocusProps {
   lineStyle: LineStyle;
   showGrid: boolean;
 }
-const viewKey = (entry: FocusEntry) => JSON.stringify([entry.result.focal.id,entry.result.dependencies.offset,entry.result.dependents.offset]);
 interface FocusRequest { node: GraphNode; dependencies: number; dependents: number; follow: boolean }
 
 function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspect, onEdge, onExit, lineStyle, showGrid }: FocusProps) {
@@ -42,19 +41,12 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<MapFlowNode>([]);
-  const { getNodes,getViewport,setViewport }=useReactFlow<MapFlowNode,Edge>();
-  const stageRef=useRef<HTMLDivElement>(null);
-  const fitAll=()=>{
-    const el=stageRef.current;if(!el)return;
-    const cards:CardRect[]=getNodes().map(n=>({id:n.id,path:n.data.item.path,x:n.position.x,y:n.position.y,width:n.measured?.width??304,height:n.measured?.height??82}));
-    const camera=fitAllViewport(cards,el.clientWidth,el.clientHeight);
-    if(camera)void setViewport(camera,{duration:0});
-  };
+  const { getNodes, getViewport } = useReactFlow<MapFlowNode, Edge>();
+  const [cameraRequest,setCameraRequest] = useState<{serial:number;viewport?:FocusEntry["viewport"]}>({serial:0});
   const previousNodes = useRef<MapFlowNode[]>([]);
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(new RequestGeneration());
   const [retry, setRetry] = useState<FocusRequest | null>(null);
-  const pendingViewport = useRef<{ key: string; viewport?: FocusEntry["viewport"] } | null>(null);
   const capture = useCallback((): FocusEntry | null => entry ? {
     ...entry,
     positions: Object.fromEntries(getNodes().map(n => [n.id, { ...n.position }])),
@@ -77,7 +69,8 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
       const graph = neighborhoodGraph(result);
       const positions = Object.fromEntries(layoutVisibleGraph({ ...graph, edges: graph.edges.map(e => ({ ...e, source: e.target, target: e.source })) }).map(n => [n.id,{x:n.x,y:n.y}]));
       const next = { result, positions };
-      pendingViewport.current = { key: viewKey(next) };
+      previousNodes.current=[];
+      setCameraRequest(current=>({serial:current.serial+1}));
       setEntry(next);
       onInspect(result.focal.id);
     } catch (failure) {
@@ -93,54 +86,39 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
   const graph = useMemo(() => entry ? neighborhoodGraph(entry.result) : { nodes: [], edges: [] }, [entry]);
   useEffect(() => {
     const next: MapFlowNode[] = graph.nodes.map(item => ({ id: item.id, type: "map", position: entry?.positions[item.id] ?? {x:0,y:0}, selected: selectedID === item.id,
-      data: { item, presentation: presentations.get(item.id) ?? presentationFor(item), files: emptyFiles, selectedID: selectedID === item.id ? selectedID : null, selectedSupplierID: null, selectedImporterID: null,
-        impactTarget: false, compact: true, dimmed: false, importingFiles: emptyIDs, supplyingFiles: emptyIDs, onToggle: noToggle, onWindow: noToggle, onSelect: onInspect } }));
-    const previous = entry && pendingViewport.current?.key === viewKey(entry) ? [] : previousNodes.current;
+      data: { compact: true, item, presentation: presentations.get(item.id) ?? presentationFor(item), files: emptyFiles, selectedID: selectedID === item.id ? selectedID : null, selectedSupplierID: null, selectedImporterID: null,
+        impactTarget: false, dimmed: false, importingFiles: emptyIDs, supplyingFiles: emptyIDs, onToggle: noToggle, onWindow: noToggle, onSelect: onInspect } }));
+    const previous = previousNodes.current;
     setNodes(old => synchronizeNodes(old,next,previous));
     previousNodes.current = next;
   }, [graph, entry, selectedID, presentations, onInspect, setNodes]);
-  useEffect(() => {
-    if (!entry || pendingViewport.current?.key !== viewKey(entry)) return;
-    let inner = 0;
-    const frame = requestAnimationFrame(() => { inner = requestAnimationFrame(() => {
-      const pending = pendingViewport.current;
-      if (pending?.key !== viewKey(entry)) return;
-      if (pending.viewport) void setViewport(pending.viewport, {duration:0});
-      else {
-        const el=stageRef.current;
-        if(!el||!el.clientWidth||!el.clientHeight)return;
-        const cards:CardRect[]=graph.nodes.map(n=>({id:n.id,path:n.path,x:entry.positions[n.id]?.x??0,y:entry.positions[n.id]?.y??0,width:304,height:82}));
-        const camera=readableViewport(cards,el.clientWidth,el.clientHeight,entry.result.focal.id,.12);
-        if(!camera)return;
-        void setViewport(camera,{duration:0});
-      }
-      pendingViewport.current = null;
-    }); });
-    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(inner); };
-  }, [entry, nodes.length, graph, setViewport]);
+  const cameraReady=!!entry && nodes.length===graph.nodes.length && nodes.every(n=>{
+    const position=entry.positions[n.id];
+    return position && n.position.x===position.x && n.position.y===position.y;
+  });
+  const fitAll=useViewCamera(cameraRequest.serial, nodes, { padding: .12, focalID: entry?.result.focal.id, restore: cameraRequest.viewport, ready: cameraReady });
   const edges = useMemo<Edge[]>(() => graph.edges.map(e => ({ id:e.id, source:e.target, target:e.source, type:"dependency", data:{lineStyle}, interactionWidth:8 })), [graph,lineStyle]);
   useEffect(() => { setPerformanceCount("routes.focus", edges.length); setPerformanceCount("cards.focus", nodes.length); return () => { setPerformanceCount("routes.focus", undefined); setPerformanceCount("cards.focus", undefined); }; }, [edges.length,nodes.length]);
   const back = () => {
     controller.current?.abort(); generation.current.next(); setLoading(false); setError(null);
     const previous = backFocus(history);
     if (!previous.current) { onExit(); return; }
-    pendingViewport.current = { key:viewKey(previous.current), viewport:previous.current.viewport ? {...previous.current.viewport} : undefined };
+    previousNodes.current=[];
+    setCameraRequest(current=>({serial:current.serial+1,viewport:previous.current?.viewport}));
     setHistory(previous.history); setEntry(previous.current); onInspect(previous.current.result.focal.id);
   };
   return <section className="graph-panel focus-panel" aria-label="Focused import neighborhood">
-    <div className="graph-head"><strong>Focus: {entry?.result.focal.path ?? target.node.path}</strong><div className="map-action-controls"><button type="button" onClick={back}>Back</button><button type="button" onClick={onExit}>Return to overview</button><button type="button" onClick={fitAll} aria-label="Fit all displayed focus cards">Fit all</button></div></div>
+    <div className="focus-head"><strong>Focus: {entry?.result.focal.path ?? target.node.path}</strong><div className="map-action-controls"><button type="button" onClick={fitAll} aria-label="Fit all displayed focus cards">Fit all</button><button type="button" onClick={back}>Back</button><button type="button" onClick={onExit}>Return to overview</button></div></div>
     <div className="focus-pages">{entry && <>
       <div><strong>Depends on</strong><PageControls total={entry.result.dependencies.total} offset={entry.result.dependencies.offset} disabled={loading} onChange={offset => void request({node:entry.result.focal,dependencies:offset,dependents:entry.result.dependents.offset,follow:false})} /></div>
       <div><strong>Depended on by</strong><PageControls total={entry.result.dependents.total} offset={entry.result.dependents.offset} disabled={loading} onChange={offset => void request({node:entry.result.focal,dependencies:entry.result.dependencies.offset,dependents:offset,follow:false})} /></div>
     </>}</div>
-    <div className="focus-status-row">
     {loading && <p className="focus-status" role="status">Loading neighborhood…</p>}
     {error && <p className="focus-status" role="alert">{error} <button type="button" onClick={() => {if (retry) void request(retry);}}>Retry</button></p>}
     {entry && entry.result.dependencies.total === 0 && entry.result.dependents.total === 0 && <p className="focus-status">No known import relationships</p>}
     {!!entry?.result.excluded_paths && <p className="focus-status">Scan scope excludes {entry.result.excluded_paths} paths; directories count once.</p>}
     {entry?.result.incomplete && <p className="focus-status">Analysis has gaps; known relationships may be incomplete.</p>}
-    </div>
-    <div className="graph-stage" ref={stageRef}><ReactFlow<MapFlowNode,Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeClick={(_,n) => onInspect(n.id)} onEdgeClick={(_,e) => {const fact = graph.edges.find(f => f.id === e.id); if (fact) onEdge(fact);}} minZoom={.01} maxZoom={2} nodesConnectable={false} deleteKeyCode={null} proOptions={{hideAttribution:true}}>
+    <div className="graph-stage"><ReactFlow<MapFlowNode,Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeClick={(_,n) => onInspect(n.id)} onEdgeClick={(_,e) => {const fact = graph.edges.find(f => f.id === e.id); if (fact) onEdge(fact);}} minZoom={.01} maxZoom={2} nodesConnectable={false} deleteKeyCode={null} proOptions={{hideAttribution:true}}>
       {showGrid && <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--grid-dot)" />}<Controls showInteractive={false} showFitView={false} />
     </ReactFlow></div>
     <div className="graph-footer"><span>{nodes.length} cards · {edges.length} incident imports</span></div>

@@ -694,14 +694,10 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .topbar-rescan { padding: 6px 10px; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; margin-right: 8px; }
 
 /* Browser navigation corrections */
-.focus-panel { display:flex;flex-direction:column;min-height:0; }
-.focus-panel .graph-head {position:relative;inset:auto;z-index:auto;display:flex;flex:0 0 auto;align-items:flex-start;flex-wrap:wrap;gap:10px 16px;padding:12px;background:var(--bg-panel);pointer-events:auto;}
-.focus-panel .graph-head > strong {flex:1 1 240px;min-width:0;overflow-wrap:anywhere;}
-.focus-panel .graph-head .map-action-controls {flex-wrap:wrap;justify-content:flex-start;}
+.focus-panel { display:flex;flex-direction:column;min-height:0;overflow:auto; }
 .focus-panel .focus-pages {display:flex;flex:0 0 auto;flex-wrap:wrap;gap:6px 20px;align-items:flex-start;min-width:0;}
 .focus-panel .focus-pages > div {display:flex;flex:1 1 210px;flex-wrap:wrap;align-items:center;gap:4px 9px;min-width:0;}
 .focus-panel .focus-pages .page-controls {margin:0;}
-.focus-panel .focus-status-row {flex:0 0 auto;min-width:0;}
 .focus-panel .focus-status {overflow-wrap:anywhere;}
 .focus-panel .graph-stage {position:relative;inset:auto;flex:1 1 auto;min-height:160px;}
 .focus-panel .graph-footer {flex:0 0 auto;}
@@ -714,3 +710,16 @@ body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Se
 .tree-more-row {display:flex;box-sizing:border-box;align-items:center;gap:8px;min-width:0;max-width:100%;}
 .tree-more-row button {flex:0 0 auto;min-height:26px;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg-subtle);color:var(--text-primary);}
 .tree-more-row span {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:11px;}
+
+/* Focus controls have their own normal-flow header, independent of overview. */
+.focus-head {display:flex;flex:0 0 auto;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px;min-width:0;}
+.focus-head > strong {flex:1 1 220px;min-width:0;overflow-wrap:anywhere;font-size:12px;}
+.focus-head .map-action-controls {flex-wrap:wrap;justify-content:flex-start;max-width:100%;}
+.focus-head button:focus-visible {outline:2px solid var(--accent);outline-offset:2px;}
+.focus-status {flex-shrink:0;}
+.tree-more-row button:disabled {opacity:.45;cursor:default;}
+.map-utility-actions {flex-wrap:wrap;}
+.graph-head .graph-title {flex-shrink:1;}
+@container (max-width: 650px) {
+  .graph-head .map-action-controls, .graph-head .map-utility-actions {max-width:100%;flex-wrap:wrap;}
+}
