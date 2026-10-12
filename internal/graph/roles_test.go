@@ -34,3 +34,14 @@ func TestUnknownSemanticRoles(t *testing.T) {
 		}
 	}
 }
+
+func TestTSJSRoles(t *testing.T) {
+	for _, language := range []string{"typescript", "javascript"} {
+		for _, kind := range []NodeKind{File, Function, Class, Method, Interface, Type, Variable, Enum} {
+			role, ok := RoleOf(Node{Kind: kind, Language: language})
+			if !ok || (kind == File && role != SourceRole) || (kind != File && role != DeclarationRole) {
+				t.Fatal(language, kind, role, ok)
+			}
+		}
+	}
+}

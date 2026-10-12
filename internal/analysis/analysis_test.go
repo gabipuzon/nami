@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -455,5 +456,92 @@ func TestMixedPythonRepository(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing Python runtime not reported")
+	}
+}
+
+func TestMixedTSJSPythonGo(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/mixed\n\ngo 1.23\n", "main.go": "package main\nfunc main() {}\n",
+		"tool.py": "def run():\n    return 1\n", "main.ts": "import './dep.js';\nenum Mode { A }\n", "dep.js": "export const run = () => 1;\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	languages := map[string]bool{}
+	for _, node := range got.Graph.Nodes {
+		languages[node.Language] = true
+	}
+	for _, language := range []string{"go", "python", "typescript", "javascript"} {
+		if !languages[language] {
+			t.Fatal("missing language", language, got.Issues)
+		}
+	}
+	if got.Coverage.FilesAnalyzed != 4 || got.Coverage.InternalResolved != 1 {
+		t.Fatal(got.Coverage, got.Issues)
+	}
+	for _, edge := range got.Graph.Edges {
+		if edge.Kind == graph.Imports && (edge.From != "file:main.ts" || edge.To != "file:dep.js") {
+			t.Fatal("invented cross-language import", edge)
+		}
+	}
+}
+
+func TestIndependentNextFixture(t *testing.T) {
+	root := filepath.Join("..", "analyzer", "tsjsanalyzer", "testdata", "next")
+	first, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatal("Next fixture facts changed")
+	}
+	if first.Coverage.FilesAnalyzed != 2 || first.Coverage.InternalResolved != 1 || first.Coverage.External != 1 || len(first.Issues) != 0 {
+		t.Fatal(first.Coverage, first.Issues)
+	}
+	if !containsEdge(first.Graph.Edges, graph.Edge{Kind: graph.Imports, From: "file:src/app/page.tsx", To: "file:src/components/card.tsx"}) {
+		t.Fatal(first.Graph.Edges)
+	}
+}
+
+func TestMissingNodePreservesGoAndPython(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, bin := t.TempDir(), t.TempDir()
+	if err := os.Symlink(python, filepath.Join(bin, "python3")); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"go.mod": "module example.com/missingnode\n\ngo 1.23\n", "main.go": "package main\nfunc main() {}\n", "main.py": "def run(): pass\n", "main.ts": "const x = 1;\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	got, err := Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Coverage.FilesAnalyzed != 2 || got.Coverage.FilesFailed != 1 {
+		t.Fatal(got.Coverage, got.Issues)
+	}
+	found := false
+	for _, issue := range got.Issues {
+		if issue.Kind == "TSJS_RUNTIME_ERROR" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing runtime gap", got.Issues)
 	}
 }

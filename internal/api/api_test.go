@@ -264,3 +264,26 @@ func TestNodeLanguageAndIndependentCounts(t *testing.T) {
 		t.Fatalf("invented export count: %s", data)
 	}
 }
+
+func TestTSJSOverviewAndEnumSerialization(t *testing.T) {
+	g, err := graph.Build(graph.Fragment{Nodes: []graph.Node{
+		{ID: "file:a.ts", Kind: graph.File, Language: "typescript", Path: "a.ts", Name: "a.ts"},
+		{ID: "enum:Mode", Kind: graph.Enum, Language: "typescript", Path: "a.ts", Name: "Mode"},
+	}, Edges: []graph.Edge{{Kind: graph.Contains, From: "file:a.ts", To: "enum:Mode"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := convertNode(g.Nodes[0])
+	encoded, err := json.Marshal(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"language":"typescript"`) {
+		t.Fatal(string(encoded))
+	}
+	handler := NewHandler(storage.Snapshot{ID: "tsjs", Result: analysis.Result{Graph: g}})
+	code, _, body := request(t, handler, "GET", "/api/v1/search?query=Mode")
+	if code != 200 || !strings.Contains(body, `"kind":"ENUM"`) {
+		t.Fatal(code, body)
+	}
+}

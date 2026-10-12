@@ -12,6 +12,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: make prepare-analyzers
       - run: make check
       - run: go build ./cmd/nami
   web:
@@ -26,6 +30,8 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - run: make prepare-analyzers
+        working-directory: .
       - run: npm ci
       - run: npm test
       - run: npm run lint

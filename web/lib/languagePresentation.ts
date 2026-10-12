@@ -22,7 +22,7 @@ export interface NodePresentation {
   sourceStats: SourceStats;
 }
 
-const goDeclarations = new Set<string>(declarationKinds.filter((kind) => kind !== "CLASS"));
+const goDeclarations = new Set<string>(declarationKinds.filter((kind) => kind !== "CLASS" && kind !== "ENUM"));
 const pythonDeclarations = new Set(["CLASS", "FUNCTION", "METHOD"]);
 
 // Missing language is a legacy snapshot: retain its canonical labels and
@@ -31,29 +31,31 @@ export function presentationFor(node: GraphNode, parent?: GraphNode, counts?: So
   const legacy = node.language === undefined || node.language === "";
   const go = node.language === "go";
   const python = node.language === "python";
+  const tsjs = node.language === "typescript" || node.language === "javascript";
+  const tsjsDeclaration = ["FUNCTION", "CLASS", "METHOD", "INTERFACE", "TYPE", "VARIABLE", "ENUM"].includes(node.kind);
   const supported = (go || legacy) && (node.kind === "MODULE" || node.kind === "PACKAGE" || node.kind === "FILE" || goDeclarations.has(node.kind)) ||
-    python && (node.kind === "PACKAGE" || node.kind === "FILE" || pythonDeclarations.has(node.kind));
+    python && (node.kind === "PACKAGE" || node.kind === "FILE" || pythonDeclarations.has(node.kind)) || tsjs && (node.kind === "FILE" || tsjsDeclaration);
   const container = supported && node.kind === "PACKAGE";
   const source = supported && node.kind === "FILE";
-  const pythonModule = python && source;
-  const stem = node.name.replace(/\.py$/, "");
+  const sourceModule = (python || tsjs) && source;
+  const stem = node.name.replace(/\.(?:py|tsx?|mts|cts|jsx?|mjs|cjs)$/, "");
   const moduleName = parent?.language === "python" && parent.kind === "PACKAGE" ?
     node.name === "__init__.py" ? parent.name : `${parent.name}.${stem}` : stem;
-  const displayName = pythonModule ? moduleName : node.name;
+  const displayName = sourceModule ? moduleName : node.name;
   return {
-    displayKind: pythonModule ? "module" : node.kind.toLowerCase(),
+    displayKind: sourceModule ? "module" : node.kind.toLowerCase(),
     displayName,
-    rowName: pythonModule ? stem : container ? python ? node.name.split(".").at(-1)! : node.path : node.name,
-    cardName: pythonModule ? moduleName : container ? python ? node.name : node.path : node.name,
-    secondaryLabel: container ? `package ${node.name}` : pythonModule ? "module" : undefined,
+    rowName: sourceModule ? stem : container ? python ? node.name.split(".").at(-1)! : node.path : node.name,
+    cardName: sourceModule ? moduleName : container ? python ? node.name : node.path : node.name,
+    secondaryLabel: container ? `package ${node.name}` : sourceModule ? "module" : undefined,
     childLabel: container ? python ? { singular: "module", plural: "modules" } : { singular: "file", plural: "files" } :
       source ? { singular: "declaration", plural: "declarations" } : { singular: "package", plural: "packages" },
-    rowGroupLabel: container ? python ? "Modules" : "Files" : pythonModule ? "Module" : "Files",
+    rowGroupLabel: container ? python ? "Modules" : "Files" : sourceModule ? "Module" : "Files",
     expansion: container ? "container" : source ? "source" : undefined,
-    primaryCard: container || pythonModule && !parent,
-    explorerSection: container ? "packages" : pythonModule && !parent ? "modules" : undefined,
-    rowMark: source ? pythonModule ? "M" : "F" : container ? undefined : "·",
-    sourceStats: { imports: source ? node.import_count : counts?.imports, exports: python ? undefined : source ? node.export_count : counts?.exports },
+    primaryCard: container || sourceModule && !parent,
+    explorerSection: container ? "packages" : sourceModule && !parent ? "modules" : undefined,
+    rowMark: source ? sourceModule ? "M" : "F" : container ? undefined : "·",
+    sourceStats: { imports: source ? node.import_count : counts?.imports, exports: python || tsjs ? undefined : source ? node.export_count : counts?.exports },
   };
 }
 

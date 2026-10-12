@@ -143,3 +143,43 @@ make build
 
 `make check` verifies Go formatting, runs tests, and runs `go vet`. CI also runs
 the web tests, lint, and build on pushes and pull requests.
+
+### Building with the TypeScript/JavaScript analyzer
+
+Node.js 24 or newer and npm are needed to prepare the pinned analyzer compiler:
+
+```bash
+make prepare-analyzers
+make check
+make build
+```
+
+Preparation uses a separate analyzer manifest and lockfile pinned to TypeScript
+6.0.3. The complete build embeds its compiler, AST helper and license notices;
+CI prepares these assets before Go tests and builds. Plain `go build` from an
+unprepared checkout works, but reports a TS/JS compiler availability gap.
+
+Distributed binaries need a locally installed Node.js for TS/JS scans. Go/Python
+scans never invoke Node or extract compiler assets. Analysis never downloads
+packages or executes the scanned repository. Trusted embedded artifacts are
+extracted atomically into private, version/content-hashed directories in the
+user cache, checked for integrity and permissions, and removed after analysis.
+`NODE_OPTIONS` and `NODE_PATH` are excluded from the helper environment.
+
+TS/JS files are modules; static imports, type-only imports and static re-exports
+are analysis dependencies, not necessarily runtime dependencies. Resolution is
+restricted to successfully scanned source files. Explicit `.js`, `.jsx`, `.mjs`
+and `.cjs` specifiers first consider their TypeScript counterparts (`.ts`/`.tsx`,
+`.tsx`, `.mts`, `.cts` respectively), then the literal source path. Extensionless
+imports consider the eight supported extensions at the file path, then at
+`index`. Multiple candidates at a step are unresolved, rather than selected by
+extension preference. Declaration files count as sources when explicitly named;
+full TypeScript compiler resolution is outside this phase.
+
+The closest tsconfig/jsconfig supplies static `baseUrl` and exact/simple wildcard
+`paths`. Exact aliases win; wildcard aliases use the longest prefix. Equal-prefix
+matching patterns remain ambiguous. Multiple alias targets must resolve uniquely. Config `extends`, project references, `rootDirs`, `moduleSuffixes` and complex
+aliases produce gaps; unsupported configuration prevents guessed local targets.
+Package workspaces are reported as unsupported. Declared package dependencies support external
+classification; unknown bare imports remain unclassified. CommonJS/dynamic
+calls and non-source assets produce limitations or unresolved dependencies.

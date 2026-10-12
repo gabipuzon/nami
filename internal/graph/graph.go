@@ -19,11 +19,12 @@ const (
 	Type      NodeKind = "TYPE"
 	Variable  NodeKind = "VARIABLE"
 	Constant  NodeKind = "CONSTANT"
+	Enum      NodeKind = "ENUM"
 )
 
 func IsDeclaration(kind NodeKind) bool {
 	switch kind {
-	case Function, Class, Method, Struct, Interface, Type, Variable, Constant:
+	case Function, Class, Method, Struct, Interface, Type, Variable, Constant, Enum:
 		return true
 	default:
 		return false

@@ -25,6 +25,14 @@ func RoleOf(node Node) (SemanticRole, bool) {
 		case Function, Method, Struct, Interface, Type, Variable, Constant:
 			return DeclarationRole, IsDeclaration(node.Kind)
 		}
+	case "typescript", "javascript":
+		if node.Kind == File {
+			return SourceRole, true
+		}
+		switch node.Kind {
+		case Function, Class, Method, Interface, Type, Variable, Enum:
+			return DeclarationRole, true
+		}
 	case "python":
 		switch node.Kind {
 		case Package:

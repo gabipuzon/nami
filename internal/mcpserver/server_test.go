@@ -581,3 +581,41 @@ func TestSourceEvidenceToolUsesSavedOccurrencesAndOwnsCopies(t *testing.T) {
 		t.Fatal(result)
 	}
 }
+
+func TestTSJSStoredSymbolsAndEnumSearch(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ts"), []byte("export enum Mode { A }\nexport const start = () => 1;\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := analysis.Map(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Save(root, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server, err := Load(root, summary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cs := connect(t, server)
+	search := decode[struct{ Nodes []nodeJSON }](t, call(t, ctx, cs, "nami_search_nodes", map[string]any{"query": "Mode", "kinds": []string{"ENUM"}}))
+	if len(search.Nodes) != 1 || search.Nodes[0].Language != "typescript" {
+		t.Fatal(search)
+	}
+	symbols := decode[struct {
+		File    nodeJSON
+		Symbols []nodeJSON
+	}](t, call(t, ctx, cs, "nami_file_symbols", map[string]any{"file_id": "file:main.ts"}))
+	if len(symbols.Symbols) != 2 || symbols.File.ExportCount != nil {
+		t.Fatal(symbols)
+	}
+}

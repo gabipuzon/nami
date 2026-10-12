@@ -345,3 +345,29 @@ test("unprojected standalone module imports remain canonical presentation facts"
   assert.equal(lines[0].sourceHandle, "file:users/models.py");
   assert.equal(lines[0].target, "file:standalone.py");
 });
+
+test("TS/JS source modules retain canonical import evidence through expansion", () => {
+  for (const language of ["typescript", "javascript"]) {
+    const graph: Graph = { nodes: [
+      { id: "a", kind: "FILE", name: "a.tsx", path: "src/a.tsx", language },
+      { id: "b", kind: "FILE", name: "b.ts", path: "src/b.ts", language },
+      { id: "mode", kind: "ENUM", name: "Mode", path: "src/b.ts", language },
+    ], edges: [{ kind: "CONTAINS", from: "b", to: "mode" }, { kind: "IMPORTS", from: "a", to: "b" }] };
+    for (const expandedFiles of [new Set<string>(), new Set(["a", "b"])]) {
+      const visible = buildVisibleGraph({ canonicalGraph: graph, packageProjection: { graph: { nodes: [], edges: [] }, evidence: [] }, expandedPackages: new Set(), expandedFiles, visibleDeclarationKinds: new Set(declarationKinds) });
+      const profiles = buildNodePresentations(graph);
+      assert.equal(profiles.get("a")?.displayKind, "module");
+      assert.equal(profiles.get("a")?.displayName, "a");
+      assert.equal(profiles.get("a")?.primaryCard, true);
+      assert.equal(profiles.get("a")?.sourceStats.exports, undefined);
+      const imports = visible.edges.filter(e => e.kind === "IMPORTS");
+      assert.equal(imports.length, 1);
+      assert.deepEqual(imports[0].evidence, [{ kind: "IMPORTS", from: "a", to: "b" }]);
+      const lines = imports.flatMap(e => importCardLines(e, new Map(visible.nodes.map(n => [n.id, n])), new Map(), new Map(graph.nodes.map(n => [n.id, n]))));
+      assert.equal(new Set(lines.map(l => l.id)).size, lines.length);
+      assert.equal(lines[0].importingFileID, "a");
+      assert.equal(lines[0].supplyingFileID, "b");
+      assert.equal(visible.nodes.some(n => n.kind === "ENUM"), expandedFiles.has("b"));
+    }
+  }
+});

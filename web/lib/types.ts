@@ -1,5 +1,5 @@
 export const declarationKinds = [
-  "FUNCTION", "CLASS", "METHOD", "STRUCT", "INTERFACE", "TYPE", "VARIABLE", "CONSTANT",
+  "FUNCTION", "CLASS", "METHOD", "STRUCT", "INTERFACE", "TYPE", "VARIABLE", "CONSTANT", "ENUM",
 ] as const;
 
 export type DeclarationKind = typeof declarationKinds[number];

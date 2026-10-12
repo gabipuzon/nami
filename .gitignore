@@ -25,3 +25,7 @@ coverage.*
 
 # Generated bundled frontend
 /internal/webui/assets/
+
+# Generated pinned TS/JS compiler and license assets
+/internal/analyzer/tsjsanalyzer/assets/*
+!/internal/analyzer/tsjsanalyzer/assets/placeholder
