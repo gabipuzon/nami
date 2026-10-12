@@ -2,15 +2,20 @@ import { getGraphIndex } from "./graphIndex.ts";
 import type { Graph, GraphNode, Neighborhood } from "./types.ts";
 import type { VisibleGraph } from "./presentation.ts";
 
-export interface ExplorerRow { node: GraphNode; depth: number; expandable: boolean }
-export function flattenExplorer(graph: Graph, expanded: ReadonlySet<string>, kinds: ReadonlySet<string>, childCounts?: Record<string, number>): ExplorerRow[] {
+export interface ExplorerRow { kind:"node"|"more"; node:GraphNode; depth:number; expandable:boolean; more?:{parentID:string;loaded:number;total:number} }
+export function flattenExplorer(graph: Graph, expanded: ReadonlySet<string>, kinds: ReadonlySet<string>, childCounts?: Record<string, number>, pages:Readonly<Record<string,{next:number;total:number}>> = {}): ExplorerRow[] {
   const { children, parent, nodes } = getGraphIndex(graph);
   const rows: ExplorerRow[] = [];
   const roots = graph.nodes.filter(n => (n.kind === "PACKAGE" && nodes.get(parent.get(n.id) ?? "")?.kind !== "PACKAGE") || (n.kind === "FILE" && !parent.has(n.id))).sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : a.id < b.id ? -1 : 1);
   const visit = (node: GraphNode, depth: number) => {
     const kids = (children.get(node.id) ?? []).filter(n => n.kind === "FILE" || n.kind === "PACKAGE" || kinds.has(n.kind));
-    rows.push({ node, depth, expandable: kids.length > 0 || (childCounts?.[node.id] ?? 0) > 0 });
-    if (expanded.has(node.id)) kids.forEach(n => visit(n, depth+1));
+    rows.push({ kind:"node",node,depth,expandable:kids.length>0||(childCounts?.[node.id]??0)>0 });
+    if(expanded.has(node.id)){
+      kids.forEach(n=>visit(n,depth+1));
+      const loaded=pages[node.id]?.next??kids.length;
+      const total=pages[node.id]?.total??childCounts?.[node.id]??kids.length;
+      if(loaded<total)rows.push({kind:"more",node,depth:depth+1,expandable:false,more:{parentID:node.id,loaded,total}});
+    }
   };
   roots.forEach(n => visit(n,0));
   return rows;
