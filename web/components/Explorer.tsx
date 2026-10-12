@@ -37,7 +37,7 @@ export function Explorer(props: ExplorerProps) {
   const [pages, setPages] = useState<Record<string,{next:number;total:number}>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [scrollTop, setScrollTop] = useState(0);
-  const rows = useMemo(() => flattenExplorer(treeGraph, expanded, visibleDeclarationKinds, childCounts, pages), [treeGraph, expanded, visibleDeclarationKinds,childCounts]);
+  const rows = useMemo(() => flattenExplorer(treeGraph, expanded, visibleDeclarationKinds, childCounts, pages), [treeGraph, expanded, visibleDeclarationKinds,childCounts,pages]);
   const [pageQuery,setPageQuery] = useState("");
   const [searchPage, setSearchPage] = useState<NodePage | null>(null);
   const [searchOffset, setSearchOffset] = useState(0);
