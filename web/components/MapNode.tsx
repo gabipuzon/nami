@@ -26,6 +26,7 @@ export type MapFlowNode = Node<{
   selectedImporterID: string | null;
   impactDistance?: number;
   impactTarget: boolean;
+  compact?: boolean;
   dimmed: boolean;
   importingFiles: ReadonlySet<string>;
   supplyingFiles: ReadonlySet<string>;
@@ -61,7 +62,7 @@ function firstRowStartingAtOrAfter(offsets: number[], position: number): number 
 
 export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode>) {
   recordPerformance("render.MapNode");
-  const { item, files, selectedID, selectedSupplierID, selectedImporterID, impactDistance, impactTarget, dimmed, importingFiles, supplyingFiles, presentation, onToggle, onSelect, onWindow } = data;
+  const { item, files, selectedID, selectedSupplierID, selectedImporterID, impactDistance, impactTarget, compact = false, dimmed, importingFiles, supplyingFiles, presentation, onToggle, onSelect, onWindow } = data;
   const listRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
@@ -137,13 +138,13 @@ export const MapNode = memo(function MapNode({ id, data }: NodeProps<MapFlowNode
     }
   }, [selectedID, selectedImporterID, selectedSupplierID, rowLayout, item.expanded, updateGeometry]);
 
-  return <div ref={cardRef} className={["map-node", "map-node-package", item.expanded ? "is-expanded" : "", selectedID === item.id ? "is-selected" : "", impactTarget ? "is-impact-target" : "", impactDistance !== undefined ? "is-affected" : "", dimmed ? "is-dimmed" : ""].filter(Boolean).join(" ")} aria-label={`${presentation.displayKind} ${presentation.displayName}`}>
+  return <div ref={cardRef} className={["map-node", "map-node-package", item.expanded ? "is-expanded" : "", compact ? "is-compact" : "", selectedID === item.id ? "is-selected" : "", impactTarget ? "is-impact-target" : "", impactDistance !== undefined ? "is-affected" : "", dimmed ? "is-dimmed" : ""].filter(Boolean).join(" ")} aria-label={`${presentation.displayKind} ${presentation.displayName}`}>
     <Handle type="target" position={Position.Left} isConnectable={false} className="map-handle" />
     <div className="map-node-main">
       <span className="map-node-identity"><span className="map-node-name" title={item.path}>{presentation.cardName}</span>{presentation.secondaryLabel && <span className="map-node-package-label" title={presentation.secondaryLabel}>{presentation.secondaryLabel}</span>}</span>
-      {item.childCount > 0 && <button className="map-node-toggle nodrag nopan" type="button" onClick={(event) => { event.stopPropagation(); onToggle(item.id); }} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${presentation.displayName}`}>{item.expanded ? "▾" : "▸"}</button>}
+      {!compact && item.childCount > 0 && <button className="map-node-toggle nodrag nopan" type="button" onClick={(event) => { event.stopPropagation(); onToggle(item.id); }} aria-label={`${item.expanded ? "Collapse" : "Expand"} ${presentation.displayName}`}>{item.expanded ? "▾" : "▸"}</button>}
     </div>
-    <div className="map-node-meta"><span>{item.childCount} {item.childCount === 1 ? presentation.childLabel.singular : presentation.childLabel.plural}</span>{!item.expanded && <span className="map-node-folded-counts" title={sourceStatsTitle(presentation.sourceStats)}><span>in {presentation.sourceStats.imports ?? "—"}</span><span>out {presentation.sourceStats.exports ?? "—"}</span></span>}{impactDistance !== undefined && <span className="impact-distance">distance {impactDistance}</span>}</div>
+    {!compact && <div className="map-node-meta"><span>{item.childCount} {item.childCount === 1 ? presentation.childLabel.singular : presentation.childLabel.plural}</span>{!item.expanded && <span className="map-node-folded-counts" title={sourceStatsTitle(presentation.sourceStats)}><span>in {presentation.sourceStats.imports ?? "—"}</span><span>out {presentation.sourceStats.exports ?? "—"}</span></span>}{impactDistance !== undefined && <span className="impact-distance">distance {impactDistance}</span>}</div>}
     {item.expanded && <>
       <div className="package-list-head"><span>{presentation.rowGroupLabel}</span><span className="package-list-import-label">imports</span><span className="package-list-export-label">exports</span></div>
       <div className="package-file-list nodrag nopan nowheel" ref={listRef} onScroll={onListScroll}>

@@ -37,7 +37,7 @@ export function Explorer(props: ExplorerProps) {
   const [pages, setPages] = useState<Record<string,{next:number;total:number}>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [scrollTop, setScrollTop] = useState(0);
-  const rows = useMemo(() => flattenExplorer(treeGraph, expanded, visibleDeclarationKinds, childCounts), [treeGraph, expanded, visibleDeclarationKinds,childCounts]);
+  const rows = useMemo(() => flattenExplorer(treeGraph, expanded, visibleDeclarationKinds, childCounts, pages), [treeGraph, expanded, visibleDeclarationKinds,childCounts,pages]);
   const [pageQuery,setPageQuery] = useState("");
   const [searchPage, setSearchPage] = useState<NodePage | null>(null);
   const [searchOffset, setSearchOffset] = useState(0);
@@ -94,16 +94,20 @@ export function Explorer(props: ExplorerProps) {
       <div className="section-heading tree-heading">Packages / modules <span>{counts.packages}</span></div>
       <div className="explorer-tree-window" onScroll={event => setScrollTop(event.currentTarget.scrollTop)}>
         <div style={{ height: first * 32 }} aria-hidden="true" />
-        {rows.slice(first,last).map(({node, depth, expandable}) => {
-          const profile = presentations.get(node.id)!;
-          const loaded = getGraphIndex(treeGraph).children.get(node.id)?.length ?? 0;
-          const total = pages[node.id]?.total ?? childCounts?.[node.id] ?? loaded;
-          const next = pages[node.id]?.next ?? 0;
-          return <div key={node.id} className={`tree-row virtual-tree-row ${selectedNodeID === node.id ? "is-selected" : ""}`} style={{ paddingLeft: 8 + depth * 14 }}>
-            {expandable ? <button type="button" className="tree-toggle" onClick={() => toggle(node.id)} aria-label={`${expanded.has(node.id) ? "Collapse" : "Expand"} ${profile.displayName}`}>{expanded.has(node.id) ? "▾" : "▸"}</button> : <span className="tree-spacer" />}
-            <button type="button" className="tree-label" onClick={() => onSelectNode(node.id)} title={`${node.path} · ${profile.displayKind}`}><span className="tree-label-primary">{profile.rowName}</span></button>
-            {expanded.has(node.id) && next < total && <button type="button" className="tree-toggle" disabled={pending===node.id} onClick={() => load(node.id,next)} title={`Showing ${next} of ${total}; load next page`}>More {next}/{total}</button>}
-            {profile.rowMark && <span className="tree-kind">{profile.rowMark}</span>}
+        {rows.slice(first,last).map(row => {
+          const { node,depth,expandable } = row;
+          const profile = presentations.get(node.id) ?? presentationFor(node);
+          if(row.kind==="more" && row.more){
+            const {parentID,loaded,total}=row.more;
+            return <div key={`more:${parentID}`} className="tree-row virtual-tree-row tree-more-row" style={{paddingLeft:8+depth*14}}>
+              <button type="button" disabled={pending===parentID} onClick={()=>load(parentID,loaded)} aria-label={`Load more children of ${profile.displayName}`}>More</button>
+              <span title={`Loaded ${loaded} of ${total} children of ${profile.displayName}`}>{loaded}/{total} loaded</span>
+            </div>;
+          }
+          return <div key={node.id} className={`tree-row virtual-tree-row ${selectedNodeID===node.id?"is-selected":""}`} style={{paddingLeft:8+depth*14}}>
+            {expandable ? <button type="button" className="tree-toggle" onClick={()=>toggle(node.id)} aria-label={`${expanded.has(node.id)?"Collapse":"Expand"} ${profile.displayName}`}>{expanded.has(node.id)?"▾":"▸"}</button> : <span className="tree-spacer"/>}
+            <button type="button" className="tree-label" onClick={()=>onSelectNode(node.id)} title={`${node.path} · ${profile.displayKind}`}><span className="tree-label-primary">{profile.rowName}</span></button>
+            {profile.rowMark&&<span className="tree-kind">{profile.rowMark}</span>}
           </div>;
         })}
         <div style={{ height: Math.max(0,rows.length-last) * 32 }} aria-hidden="true" />

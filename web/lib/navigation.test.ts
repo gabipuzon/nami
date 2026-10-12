@@ -132,3 +132,29 @@ test("bundling actual Go and Python presentation retains saved imports through e
     }
   }
 });
+
+test("Explorer More controls appear after expanded nested descendants and retain 32px rows",()=>{
+ const graph:Graph={nodes:[
+  {id:"root",kind:"PACKAGE",name:"root",path:"root"},
+  {id:"nested",kind:"PACKAGE",name:"nested",path:"root/nested"},
+  {id:"grandchild",kind:"FILE",name:"grandchild",path:"root/nested/grandchild.py"},
+  {id:"sibling",kind:"FILE",name:"sibling",path:"root/sibling.py"},
+  {id:"other",kind:"PACKAGE",name:"other",path:"z/other"}
+ ],edges:[
+  {kind:"CONTAINS",from:"root",to:"nested"},
+  {kind:"CONTAINS",from:"nested",to:"grandchild"},
+  {kind:"CONTAINS",from:"root",to:"sibling"}
+ ]};
+ const rows=flattenExplorer(graph,new Set(["root","nested"]),new Set(),
+  {root:4,nested:3},{root:{next:2,total:4},nested:{next:1,total:3}});
+ assert.deepEqual(rows.map(r=>r.kind==="more"?"more:"+r.node.id:r.node.id),
+  ["root","nested","grandchild","more:nested","sibling","more:root","other"]);
+ assert.deepEqual(rows.map(r=>r.depth),[0,1,2,2,1,1,0]);
+ assert.equal(rows.length*32,224);
+ assert.deepEqual(rows.filter(r=>r.more).map(r=>r.more),[
+  {parentID:"nested",loaded:1,total:3},{parentID:"root",loaded:2,total:4}
+ ]);
+ const completed=flattenExplorer(graph,new Set(["root","nested"]),new Set(),
+ {root:2,nested:1},{root:{next:2,total:2},nested:{next:1,total:1}});
+ assert(!completed.some(r=>r.kind==="more"));
+});

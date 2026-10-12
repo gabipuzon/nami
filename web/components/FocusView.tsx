@@ -6,6 +6,7 @@ import { setPerformanceCount } from "../lib/performance";
 import { loadNeighborhood } from "../lib/api";
 import { backFocus, pushFocus, neighborhoodGraph, RequestGeneration, type FocusEntry } from "../lib/navigation";
 import { layoutVisibleGraph } from "../lib/layout";
+import { readableViewport,fitAllViewport,type CardRect } from "../lib/viewport";
 import { synchronizeNodes } from "../lib/flowState";
 import type { GraphNode, LoadedData } from "../lib/types";
 import { presentationFor, type NodePresentation } from "../lib/languagePresentation";
@@ -41,7 +42,14 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<MapFlowNode>([]);
-  const { getNodes, getViewport, setViewport, fitView } = useReactFlow<MapFlowNode, Edge>();
+  const { getNodes,getViewport,setViewport }=useReactFlow<MapFlowNode,Edge>();
+  const stageRef=useRef<HTMLDivElement>(null);
+  const fitAll=()=>{
+    const el=stageRef.current;if(!el)return;
+    const cards:CardRect[]=getNodes().map(n=>({id:n.id,path:n.data.item.path,x:n.position.x,y:n.position.y,width:n.measured?.width??304,height:n.measured?.height??82}));
+    const camera=fitAllViewport(cards,el.clientWidth,el.clientHeight);
+    if(camera)void setViewport(camera,{duration:0});
+  };
   const previousNodes = useRef<MapFlowNode[]>([]);
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(new RequestGeneration());
@@ -86,7 +94,7 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
   useEffect(() => {
     const next: MapFlowNode[] = graph.nodes.map(item => ({ id: item.id, type: "map", position: entry?.positions[item.id] ?? {x:0,y:0}, selected: selectedID === item.id,
       data: { item, presentation: presentations.get(item.id) ?? presentationFor(item), files: emptyFiles, selectedID: selectedID === item.id ? selectedID : null, selectedSupplierID: null, selectedImporterID: null,
-        impactTarget: false, dimmed: false, importingFiles: emptyIDs, supplyingFiles: emptyIDs, onToggle: noToggle, onWindow: noToggle, onSelect: onInspect } }));
+        impactTarget: false, compact: true, dimmed: false, importingFiles: emptyIDs, supplyingFiles: emptyIDs, onToggle: noToggle, onWindow: noToggle, onSelect: onInspect } }));
     const previous = entry && pendingViewport.current?.key === viewKey(entry) ? [] : previousNodes.current;
     setNodes(old => synchronizeNodes(old,next,previous));
     previousNodes.current = next;
@@ -98,11 +106,18 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
       const pending = pendingViewport.current;
       if (pending?.key !== viewKey(entry)) return;
       if (pending.viewport) void setViewport(pending.viewport, {duration:0});
-      else void fitView({padding:.12,duration:0,minZoom:.01,maxZoom:1.15});
+      else {
+        const el=stageRef.current;
+        if(!el||!el.clientWidth||!el.clientHeight)return;
+        const cards:CardRect[]=graph.nodes.map(n=>({id:n.id,path:n.path,x:entry.positions[n.id]?.x??0,y:entry.positions[n.id]?.y??0,width:304,height:82}));
+        const camera=readableViewport(cards,el.clientWidth,el.clientHeight,entry.result.focal.id,.12);
+        if(!camera)return;
+        void setViewport(camera,{duration:0});
+      }
       pendingViewport.current = null;
     }); });
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(inner); };
-  }, [entry, nodes.length, fitView, setViewport]);
+  }, [entry, nodes.length, graph, setViewport]);
   const edges = useMemo<Edge[]>(() => graph.edges.map(e => ({ id:e.id, source:e.target, target:e.source, type:"dependency", data:{lineStyle}, interactionWidth:8 })), [graph,lineStyle]);
   useEffect(() => { setPerformanceCount("routes.focus", edges.length); setPerformanceCount("cards.focus", nodes.length); return () => { setPerformanceCount("routes.focus", undefined); setPerformanceCount("cards.focus", undefined); }; }, [edges.length,nodes.length]);
   const back = () => {
@@ -113,18 +128,20 @@ function FocusCanvas({ onGraph, target, data, presentations, selectedID, onInspe
     setHistory(previous.history); setEntry(previous.current); onInspect(previous.current.result.focal.id);
   };
   return <section className="graph-panel focus-panel" aria-label="Focused import neighborhood">
-    <div className="graph-head"><strong>Focus: {entry?.result.focal.path ?? target.node.path}</strong><div className="map-action-controls"><button type="button" onClick={back}>Back</button><button type="button" onClick={onExit}>Return to overview</button></div></div>
+    <div className="graph-head"><strong>Focus: {entry?.result.focal.path ?? target.node.path}</strong><div className="map-action-controls"><button type="button" onClick={back}>Back</button><button type="button" onClick={onExit}>Return to overview</button><button type="button" onClick={fitAll} aria-label="Fit all displayed focus cards">Fit all</button></div></div>
     <div className="focus-pages">{entry && <>
       <div><strong>Depends on</strong><PageControls total={entry.result.dependencies.total} offset={entry.result.dependencies.offset} disabled={loading} onChange={offset => void request({node:entry.result.focal,dependencies:offset,dependents:entry.result.dependents.offset,follow:false})} /></div>
       <div><strong>Depended on by</strong><PageControls total={entry.result.dependents.total} offset={entry.result.dependents.offset} disabled={loading} onChange={offset => void request({node:entry.result.focal,dependencies:entry.result.dependencies.offset,dependents:offset,follow:false})} /></div>
     </>}</div>
+    <div className="focus-status-row">
     {loading && <p className="focus-status" role="status">Loading neighborhood…</p>}
     {error && <p className="focus-status" role="alert">{error} <button type="button" onClick={() => {if (retry) void request(retry);}}>Retry</button></p>}
     {entry && entry.result.dependencies.total === 0 && entry.result.dependents.total === 0 && <p className="focus-status">No known import relationships</p>}
     {!!entry?.result.excluded_paths && <p className="focus-status">Scan scope excludes {entry.result.excluded_paths} paths; directories count once.</p>}
     {entry?.result.incomplete && <p className="focus-status">Analysis has gaps; known relationships may be incomplete.</p>}
-    <div className="graph-stage"><ReactFlow<MapFlowNode,Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeClick={(_,n) => onInspect(n.id)} onEdgeClick={(_,e) => {const fact = graph.edges.find(f => f.id === e.id); if (fact) onEdge(fact);}} minZoom={.01} maxZoom={2} nodesConnectable={false} deleteKeyCode={null} proOptions={{hideAttribution:true}}>
-      {showGrid && <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--grid-dot)" />}<Controls showInteractive={false} />
+    </div>
+    <div className="graph-stage" ref={stageRef}><ReactFlow<MapFlowNode,Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeClick={(_,n) => onInspect(n.id)} onEdgeClick={(_,e) => {const fact = graph.edges.find(f => f.id === e.id); if (fact) onEdge(fact);}} minZoom={.01} maxZoom={2} nodesConnectable={false} deleteKeyCode={null} proOptions={{hideAttribution:true}}>
+      {showGrid && <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--grid-dot)" />}<Controls showInteractive={false} showFitView={false} />
     </ReactFlow></div>
     <div className="graph-footer"><span>{nodes.length} cards · {edges.length} incident imports</span></div>
   </section>;

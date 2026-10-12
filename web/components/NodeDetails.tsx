@@ -20,7 +20,7 @@ export function NodeDetails({ node, presentation, impact, onMerge, onSelectNode,
   const list=(title:string,key:keyof typeof offsets,page:NodePage)=> <section className="detail-section">
     <h3>{title} <span>{page.total}</span></h3>
     {page.total===0?<p className="muted">None known in this saved scan</p>:<>
-      <ul className="detail-list">{page.nodes.map(item=><li key={item.id}><button onClick={()=>onSelectNode(item.id)}><span className="detail-row-name">{item.name}</span><code className="detail-row-meta">{item.path}</code></button></li>)}</ul>
+      <ul className="detail-list">{page.nodes.map(item=><li key={item.id}><button onClick={()=>onSelectNode(item.id)} title={item.path}><span className="detail-row-name" title={item.name}>{item.name}</span><code className="detail-row-meta" title={item.path}>{item.path}</code></button></li>)}</ul>
       <PageControls total={page.total} offset={page.offset} onChange={offset=>setOffsets(current=>({...current,[key]:offset}))}/>
     </>}
   </section>;
@@ -28,12 +28,14 @@ export function NodeDetails({ node, presentation, impact, onMerge, onSelectNode,
     <div className="panel-heading"><h2>Inspector</h2><span>{profile.displayKind}</span></div>
     <div className="details-scroll"><div className="detail-intro"><h3>{profile.displayName}</h3><code>{node.path}</code></div>
       <p className="muted">{node.kind.toLowerCase()} · {node.language || "unknown language"}</p>
+      <div className="detail-actions" role="group" aria-label="Inspector actions">
       {(node.kind==="FILE"||node.kind==="PACKAGE")&&<button className="focus-action" onClick={()=>onFocus(node)}>Focus {node.kind.toLowerCase()}</button>}
       {detail && node.kind!=="FILE"&&node.kind!=="PACKAGE"&&detail.parent&&<button onClick={()=>{const parent=detail.graph.nodes.find(n=>n.id===detail.parent);if(parent?.kind==="FILE")onFocus(parent);}}>Focus containing file</button>}
+      {detail?.parent&&<button type="button" onClick={()=>onSelectNode(detail.parent!)}>Inspect parent</button>}
+      </div>
       {error&&<p role="alert">{error} <button onClick={()=>setAttempt(n=>n+1)}>Retry</button></p>}
       {!detail&&!error&&<p>Inspection detail is loading…</p>}
       {detail&&<>
-        {detail.parent&&<button onClick={()=>onSelectNode(detail.parent)}>Inspect parent</button>}
         {list("Contains","children",detail.children)}
         {list(node.kind==="PACKAGE"?"Depends on":"Known outgoing relationships","dependencies",detail.dependencies)}
         {list(node.kind==="PACKAGE"?"Depended on by":"Known incoming relationships","dependents",detail.dependents)}
