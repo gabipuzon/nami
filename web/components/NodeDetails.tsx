@@ -29,7 +29,7 @@ export function NodeDetails({ node, presentation, impact, onMerge, onSelectNode,
     <div className="details-scroll"><div className="detail-intro"><h3>{profile.displayName}</h3><code>{node.path}</code></div>
       <p className="muted">{node.kind.toLowerCase()} · {node.language || "unknown language"}</p>
       <div className="detail-actions" role="group" aria-label="Inspector actions">
-      {(node.kind==="FILE"||node.kind==="PACKAGE")&&<button className="focus-action" onClick={()=>onFocus(node)}>Focus {node.kind.toLowerCase()}</button>
+      {(node.kind==="FILE"||node.kind==="PACKAGE")&&<button className="focus-action" onClick={()=>onFocus(node)}>Focus {node.kind.toLowerCase()}</button>}
       {detail && node.kind!=="FILE"&&node.kind!=="PACKAGE"&&detail.parent&&<button onClick={()=>{const parent=detail.graph.nodes.find(n=>n.id===detail.parent);if(parent?.kind==="FILE")onFocus(parent);}}>Focus containing file</button>}
       {detail?.parent&&<button type="button" onClick={()=>onSelectNode(detail.parent!)}>Inspect parent</button>}
       </div>
