@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { flattenExplorer, neighborhoodGraph, pushFocus, backFocus, RequestGeneration, type FocusEntry } from "./navigation.ts";
+import { flattenExplorer, explorerWindow, explorerPagination, type ExplorerPagination, neighborhoodGraph, pushFocus, backFocus, RequestGeneration, type FocusEntry } from "./navigation.ts";
 import { bundleRoutes, rowWindow, sameWindow, connectedHandles, ABOVE, BELOW } from "./bundles.ts";
 import { buildVisibleGraph, buildExportUseIndex, importCardLines, type CardImportLine, type VisibleEdge } from "./presentation.ts";
 import type { Graph, Neighborhood } from "./types.ts";
@@ -55,10 +55,10 @@ test("Explorer expansion flattens saved children independently of canvas state",
   const graph: Graph = {nodes:[{id:"p",kind:"PACKAGE",name:"p",path:"p"},{id:"f",kind:"FILE",name:"f",path:"p/f.py"},{id:"d",kind:"FUNCTION",name:"run",path:"p/f.py"}],edges:[{kind:"CONTAINS",from:"p",to:"f"},{kind:"CONTAINS",from:"f",to:"d"}]};
   const canvasExpanded = new Set<string>();
   const explorerExpanded = new Set(["p","f"]);
-  assert.deepEqual(flattenExplorer(graph,explorerExpanded,new Set(["FUNCTION"])).map(r=>[r.node.id,r.depth]),[["p",0],["f",1],["d",2]]);
+  assert.deepEqual(flattenExplorer(graph,explorerExpanded,new Set(["FUNCTION"])).filter(r=>r.kind==="node").map(r=>[r.node.id,r.depth]),[["p",0],["f",1],["d",2]]);
   assert.equal(canvasExpanded.size,0);
-  assert.deepEqual(flattenExplorer(graph,canvasExpanded,new Set(["FUNCTION"])).map(r=>r.node.id),["p"]);
-  assert.deepEqual(flattenExplorer(graph,explorerExpanded,new Set()).map(r=>r.node.id),["p","f"]);
+  assert.deepEqual(flattenExplorer(graph,canvasExpanded,new Set(["FUNCTION"])).filter(r=>r.kind==="node").map(r=>r.node.id),["p"]);
+  assert.deepEqual(flattenExplorer(graph,explorerExpanded,new Set()).filter(r=>r.kind==="node").map(r=>r.node.id),["p","f"]);
 });
 
 test("scrolling and collapse account for every route and fact exactly once with bounded handles", () => {
@@ -147,14 +147,64 @@ test("Explorer More controls appear after expanded nested descendants and retain
  ]};
  const rows=flattenExplorer(graph,new Set(["root","nested"]),new Set(),
   {root:4,nested:3},{root:{next:2,total:4},nested:{next:1,total:3}});
- assert.deepEqual(rows.map(r=>r.kind==="more"?"more:"+r.node.id:r.node.id),
+ assert.deepEqual(rows.map(r=>r.kind==="more"?"more:"+r.parent.id:r.node.id),
   ["root","nested","grandchild","more:nested","sibling","more:root","other"]);
  assert.deepEqual(rows.map(r=>r.depth),[0,1,2,2,1,1,0]);
  assert.equal(rows.length*32,224);
- assert.deepEqual(rows.filter(r=>r.more).map(r=>r.more),[
+ assert.deepEqual(rows.filter(r=>r.kind==="more").map(r=>({parentID:r.parent.id,loaded:r.loaded,total:r.total})),[
   {parentID:"nested",loaded:1,total:3},{parentID:"root",loaded:2,total:4}
  ]);
  const completed=flattenExplorer(graph,new Set(["root","nested"]),new Set(),
  {root:2,nested:1},{root:{next:2,total:2},nested:{next:1,total:1}});
  assert(!completed.some(r=>r.kind==="more"));
+});
+
+test("Explorer collapse/reopen retains cursors, nested expansion and stable More keys", () => {
+  const graph: Graph = { nodes: [
+    { id: "p", kind: "PACKAGE", name: "p", path: "p" },
+    { id: "q", kind: "PACKAGE", name: "q", path: "p/q" },
+    { id: "f", kind: "FILE", name: "f", path: "p/q/f.py" },
+  ], edges: [{ kind: "CONTAINS", from: "p", to: "q" }, { kind: "CONTAINS", from: "q", to: "f" }] };
+  let state: ExplorerPagination = { pages: {}, expanded: new Set(), pending: new Set() };
+  state = explorerPagination(state, { type: "loaded", id: "p", next: 20, total: 70 });
+  state = explorerPagination(state, { type: "loaded", id: "q", next: 20, total: 50 });
+  const flatten = () => flattenExplorer(graph, state.expanded, new Set(), undefined, state.pages);
+  const keys = flatten().map(r => r.key);
+  assert.deepEqual(keys, ["node:p", "node:q", "node:f", "more:q", "more:p"]);
+  for (const next of [40, 60]) {
+    state = explorerPagination(state, { type: "loaded", id: "p", next, total: 70 });
+    assert.deepEqual(flatten().map(r => r.key), keys);
+    const pages = state.pages;
+    state = explorerPagination(state, { type: "collapse", id: "p" });
+    assert.deepEqual(flatten().map(r => r.key), ["node:p"]);
+    state = explorerPagination(state, { type: "expand", id: "p" });
+    assert.equal(state.pages, pages);
+    assert.equal(state.pages.p.next, next);
+    assert(state.expanded.has("q"));
+    assert.deepEqual(flatten().map(r => r.key), keys);
+  }
+});
+
+test("concurrent Explorer loads settle or collapse independently", () => {
+  let state: ExplorerPagination = { pages: {}, expanded: new Set(["a", "b"]), pending: new Set() };
+  state = explorerPagination(state, { type: "start", id: "a" });
+  state = explorerPagination(state, { type: "start", id: "b" });
+  const bothPending = state;
+  state = explorerPagination(state, { type: "loaded", id: "a", next: 20, total: 40 });
+  assert.deepEqual([...state.pending], ["b"]);
+  assert.deepEqual([...bothPending.pending], ["a", "b"]);
+  state = explorerPagination(state, { type: "start", id: "a" });
+  state = explorerPagination(state, { type: "collapse", id: "a" });
+  assert.deepEqual([...state.pending], ["b"]);
+  assert.equal(state.pages.a.next, 20);
+  assert(state.expanded.has("b"));
+  state = explorerPagination(state, { type: "settled", id: "b" });
+  assert.equal(state.pending.size, 0);
+});
+
+test("Explorer virtual windows clamp after collapse and preserve fixed row offsets", () => {
+  assert.deepEqual(explorerWindow(100, 32 * 30), { first: 28, last: 52, before: 896, after: 1536 });
+  assert.deepEqual(explorerWindow(0, 1000), { first: 0, last: 0, before: 0, after: 0 });
+  assert.deepEqual(explorerWindow(3, 3200), { first: 2, last: 3, before: 64, after: 0 });
+  assert.deepEqual(explorerWindow(3, -32), { first: 0, last: 3, before: 0, after: 0 });
 });

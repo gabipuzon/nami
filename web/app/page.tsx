@@ -1,10 +1,9 @@
 "use client";
 
 import { recordPerformance, setPerformanceCount } from "../lib/performance";
-import {readableViewport,fitAllViewport,type CardRect,type Camera} from "../lib/viewport";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, BackgroundVariant, Controls, ReactFlowProvider, useNodesState, useStore, useReactFlow, type ReactFlowState, type Edge, type NodeChange } from "@xyflow/react";
+import { ReactFlow, Background, BackgroundVariant, Controls, ReactFlowProvider, useNodesState, useStore, type ReactFlowState, type Edge, type NodeChange, useReactFlow } from "@xyflow/react";
 import { Explorer } from "../components/Explorer";
 import { Details } from "../components/Details";
 import { MapNode, type CardFile, type MapFlowNode } from "../components/MapNode";
@@ -19,6 +18,8 @@ import { loadImpact, loadInitialData, pinSnapshot, rescan, loadPackageDetail, lo
 import { buildNodePresentations, type NodePresentation } from "../lib/languagePresentation";
 import { getGraphIndex } from "../lib/graphIndex";
 import { edgesWithRegisteredHandles, equalHandleSnapshots, synchronizeNodes } from "../lib/flowState";
+import { useViewCamera } from "../lib/useViewCamera";
+import { OverviewCamera } from "../lib/viewport";
 import { layoutVisibleGraph } from "../lib/layout";
 import { buildExportUseIndex, buildVisibleGraph, directlyConnectedPackages, fileDependencyRoles, importCardLines, packageSourceCounts, revealNode } from "../lib/presentation";
 import type { DeclarationKind, GraphNode, Impact, LoadedData } from "../lib/types";
@@ -61,27 +62,8 @@ function GraphCanvas(props: GraphCanvasProps) {
   recordPerformance("render.GraphCanvas");
   const { nodes, edges, hasCards, showGrid, importCount, impactActive, impactTargetID, impactTargetName, impactLoading, impactError, selectedPackageID, focusActive, connectedOnly, hiddenCardCount, onClearImpact, onShowImpact, onResetPositions, onToggleConnectedOnly, onSelectNode, onSelectEdge, onClearSelection, onToggleNode, onDragStop } = props;
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<MapFlowNode>(nodes);
-  const {getNodes,setViewport}=useReactFlow<MapFlowNode,Edge>();
-  const stageRef=useRef<HTMLDivElement>(null);
-  const initialized=useRef(false);
-  useEffect(()=>{
-    if(initialized.current||!hasCards)return;
-    const raf=requestAnimationFrame(()=>{
-      const el=stageRef.current;
-      if(!el||!el.clientWidth||!el.clientHeight)return;
-      const cards:CardRect[]=nodes.map(n=>({id:n.id,path:n.data.item.path,x:n.position.x,y:n.position.y,width:n.measured?.width??304,height:n.measured?.height??82}));
-      const camera=readableViewport(cards,el.clientWidth,el.clientHeight);
-      if(camera){initialized.current=true;void setViewport(camera,{duration:0});}
-    });
-    return ()=>cancelAnimationFrame(raf);
-  },[hasCards,nodes,setViewport]);
-  const fitAll=()=>{
-    const el=stageRef.current;if(!el)return;
-    const cards:CardRect[]=getNodes().map(n=>({id:n.id,path:n.data.item.path,x:n.position.x,y:n.position.y,width:n.measured?.width??304,height:n.measured?.height??82}));
-    const camera=fitAllViewport(cards,el.clientWidth,el.clientHeight);
-    if(camera)void setViewport(camera,{duration:0});
-  };
   useEffect(() => { setPerformanceCount("routes.overview", edges.length); return () => setPerformanceCount("routes.overview", undefined); }, [edges.length]);
+  const fitAll=useViewCamera("overview", flowNodes, { padding: .08 });
   const handleSnapshot = useStore(selectHandleSnapshot, equalHandleSnapshots);
   const registeredEdges = useMemo(() => edgesWithRegisteredHandles(edges, handleSnapshot), [edges, handleSnapshot]);
 
@@ -120,7 +102,7 @@ function GraphCanvas(props: GraphCanvasProps) {
       </div>
       {impactError && <span className="map-action-error" role="alert">{impactError}</span>}
     </div>
-    <div className="graph-stage" ref={stageRef}>
+    <div className="graph-stage">
       {!hasCards ? <div className="graph-empty">This saved scan has no packages or modules to display.</div> : <ReactFlow<MapFlowNode, Edge>
         nodes={flowNodes} edges={registeredEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onVisualNodeChange}
         onNodeClick={(_, node) => onSelectNode(node.id)}
@@ -146,7 +128,7 @@ function GraphCanvas(props: GraphCanvasProps) {
 function MapApp({ onSnapshot }: { onSnapshot: (id: string) => void }) {
   recordPerformance("render.MapApp");
   const {getViewport,setViewport}=useReactFlow<MapFlowNode,Edge>();
-  const savedOverview=useRef<Camera|null>(null);
+  const overviewCamera = useRef(new OverviewCamera());
   const [data, setData] = useState<LoadedData | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -294,7 +276,7 @@ function MapApp({ onSnapshot }: { onSnapshot: (id: string) => void }) {
     setSelectedBundle(null); setFocusedEdge(null); setImpactError(null);
   }, [canonicalNodes,mergeLoaded]);
   const focusNode = useCallback((node: GraphNode) => {
-    if (!focusTarget) savedOverview.current=getViewport();
+    if (!focusTarget) overviewCamera.current.capture(getViewport());
     if (!focusTarget) setOverviewSelection({node:selectedNodeID,edge:selectedEdgeID,supplier:selectedSupplierID,importer:selectedImporterID,bundle:selectedBundle});
     impactRequest.current++;
     setImpactLoading(false);
@@ -307,12 +289,19 @@ function MapApp({ onSnapshot }: { onSnapshot: (id: string) => void }) {
     if (selection) {setSelectedNodeID(selection.node);setSelectedEdgeID(selection.edge);setSelectedSupplierID(selection.supplier);setSelectedImporterID(selection.importer);setSelectedBundle(selection.bundle);}
     setOverviewSelection(null);
   }, [overviewSelection]);
-  useEffect(()=>{
-    if(focusTarget||!savedOverview.current)return;
-    const camera=savedOverview.current;let inner=0;
-    const raf=requestAnimationFrame(()=>{inner=requestAnimationFrame(()=>{void setViewport(camera,{duration:0});if(savedOverview.current===camera)savedOverview.current=null;});});
-    return ()=>{cancelAnimationFrame(raf);cancelAnimationFrame(inner);};
-  },[focusTarget,setViewport]);
+  useEffect(() => {
+    if (focusTarget) return;
+    const camera = overviewCamera.current.peek();
+    if (!camera) return;
+    let inner = 0;
+    const frame = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        void setViewport(camera, { duration: 0 });
+        overviewCamera.current.consume(camera);
+      });
+    });
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(inner); };
+  }, [focusTarget, setViewport]);
   const revealFiles = useCallback((ids: string[]) => {
     if (!data) return;
     const controller=new AbortController();detailControllers.current.add(controller);
