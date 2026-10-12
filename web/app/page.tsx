@@ -1,9 +1,10 @@
 "use client";
 
 import { recordPerformance, setPerformanceCount } from "../lib/performance";
+import {readableViewport,fitAllViewport,type CardRect,type Camera} from "../lib/viewport";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, BackgroundVariant, Controls, ReactFlowProvider, useNodesState, useStore, type ReactFlowState, type Edge, type NodeChange } from "@xyflow/react";
+import { ReactFlow, Background, BackgroundVariant, Controls, ReactFlowProvider, useNodesState, useStore, useReactFlow, type ReactFlowState, type Edge, type NodeChange } from "@xyflow/react";
 import { Explorer } from "../components/Explorer";
 import { Details } from "../components/Details";
 import { MapNode, type CardFile, type MapFlowNode } from "../components/MapNode";
@@ -27,7 +28,6 @@ import { declarationKinds } from "../lib/types";
 const nodeTypes = { map: MapNode };
 const edgeTypes = { dependency: DependencyEdge };
 const emptyCardFiles: CardFile[] = [];
-const fitViewOptions = { padding: 0.08, minZoom: 0.01, maxZoom: 1.15 };
 const proOptions = { hideAttribution: true };
 const selectHandleSnapshot = (state: ReactFlowState) => [...state.nodeLookup].map(([id, node]) => [id, node.internals.handleBounds] as const);
 
@@ -61,6 +61,26 @@ function GraphCanvas(props: GraphCanvasProps) {
   recordPerformance("render.GraphCanvas");
   const { nodes, edges, hasCards, showGrid, importCount, impactActive, impactTargetID, impactTargetName, impactLoading, impactError, selectedPackageID, focusActive, connectedOnly, hiddenCardCount, onClearImpact, onShowImpact, onResetPositions, onToggleConnectedOnly, onSelectNode, onSelectEdge, onClearSelection, onToggleNode, onDragStop } = props;
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<MapFlowNode>(nodes);
+  const {getNodes,setViewport}=useReactFlow<MapFlowNode,Edge>();
+  const stageRef=useRef<HTMLDivElement>(null);
+  const initialized=useRef(false);
+  useEffect(()=>{
+    if(initialized.current||!hasCards)return;
+    const raf=requestAnimationFrame(()=>{
+      const el=stageRef.current;
+      if(!el||!el.clientWidth||!el.clientHeight)return;
+      const cards:CardRect[]=nodes.map(n=>({id:n.id,path:n.data.item.path,x:n.position.x,y:n.position.y,width:n.measured?.width??304,height:n.measured?.height??82}));
+      const camera=readableViewport(cards,el.clientWidth,el.clientHeight);
+      if(camera){initialized.current=true;void setViewport(camera,{duration:0});}
+    });
+    return ()=>cancelAnimationFrame(raf);
+  },[hasCards,nodes,setViewport]);
+  const fitAll=()=>{
+    const el=stageRef.current;if(!el)return;
+    const cards:CardRect[]=getNodes().map(n=>({id:n.id,path:n.data.item.path,x:n.position.x,y:n.position.y,width:n.measured?.width??304,height:n.measured?.height??82}));
+    const camera=fitAllViewport(cards,el.clientWidth,el.clientHeight);
+    if(camera)void setViewport(camera,{duration:0});
+  };
   useEffect(() => { setPerformanceCount("routes.overview", edges.length); return () => setPerformanceCount("routes.overview", undefined); }, [edges.length]);
   const handleSnapshot = useStore(selectHandleSnapshot, equalHandleSnapshots);
   const registeredEdges = useMemo(() => edgesWithRegisteredHandles(edges, handleSnapshot), [edges, handleSnapshot]);
@@ -94,12 +114,13 @@ function GraphCanvas(props: GraphCanvasProps) {
           {connectedOnly ? `Show full map (${hiddenCardCount} hidden)` : "Show connected only"}
         </button>}
         <div className="map-utility-actions">
+          <button type="button" onClick={fitAll} aria-label="Fit all displayed cards">Fit all</button>
           <button type="button" onClick={onResetPositions} title="Restore the current graph's starting layout">Reset positions</button>
         </div>
       </div>
       {impactError && <span className="map-action-error" role="alert">{impactError}</span>}
     </div>
-    <div className="graph-stage">
+    <div className="graph-stage" ref={stageRef}>
       {!hasCards ? <div className="graph-empty">This saved scan has no packages or modules to display.</div> : <ReactFlow<MapFlowNode, Edge>
         nodes={flowNodes} edges={registeredEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onVisualNodeChange}
         onNodeClick={(_, node) => onSelectNode(node.id)}
@@ -107,11 +128,11 @@ function GraphCanvas(props: GraphCanvasProps) {
         onNodeDragStop={(_, node) => onDragStop(node.id, node.position)}
         onEdgeClick={(_, edge) => onSelectEdge(edge.id, typeof edge.data?.supplyingFileID === "string" ? edge.data.supplyingFileID : undefined, typeof edge.data?.importingFileID === "string" ? edge.data.importingFileID : undefined)}
         onPaneClick={onClearSelection}
-        fitView fitViewOptions={fitViewOptions} minZoom={0.01} maxZoom={2} proOptions={proOptions}
+        minZoom={0.01} maxZoom={2} proOptions={proOptions}
         nodesConnectable={false} deleteKeyCode={null} edgesFocusable elementsSelectable
       >
         {showGrid && <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--grid-dot)" />}
-        <Controls showInteractive={false} fitViewOptions={fitViewOptions} />
+        <Controls showInteractive={false} showFitView={false} />
       </ReactFlow>}
     </div>
     <div className="graph-footer">
@@ -124,6 +145,8 @@ function GraphCanvas(props: GraphCanvasProps) {
 
 function MapApp({ onSnapshot }: { onSnapshot: (id: string) => void }) {
   recordPerformance("render.MapApp");
+  const {getViewport,setViewport}=useReactFlow<MapFlowNode,Edge>();
+  const savedOverview=useRef<Camera|null>(null);
   const [data, setData] = useState<LoadedData | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -271,18 +294,25 @@ function MapApp({ onSnapshot }: { onSnapshot: (id: string) => void }) {
     setSelectedBundle(null); setFocusedEdge(null); setImpactError(null);
   }, [canonicalNodes,mergeLoaded]);
   const focusNode = useCallback((node: GraphNode) => {
+    if (!focusTarget) savedOverview.current=getViewport();
     if (!focusTarget) setOverviewSelection({node:selectedNodeID,edge:selectedEdgeID,supplier:selectedSupplierID,importer:selectedImporterID,bundle:selectedBundle});
     impactRequest.current++;
     setImpactLoading(false);
     setFocusTarget(current => ({node,sequence:(current?.sequence ?? 0)+1}));
     setSelectedBundle(null); setFocusedEdge(null);
-  }, [focusTarget,selectedNodeID,selectedEdgeID,selectedSupplierID,selectedImporterID,selectedBundle]);
+  }, [focusTarget,selectedNodeID,selectedEdgeID,selectedSupplierID,selectedImporterID,selectedBundle,getViewport]);
   const returnToOverview = useCallback(() => {
     setFocusTarget(null); setFocusedEdge(null);
     const selection = overviewSelection;
     if (selection) {setSelectedNodeID(selection.node);setSelectedEdgeID(selection.edge);setSelectedSupplierID(selection.supplier);setSelectedImporterID(selection.importer);setSelectedBundle(selection.bundle);}
     setOverviewSelection(null);
   }, [overviewSelection]);
+  useEffect(()=>{
+    if(focusTarget||!savedOverview.current)return;
+    const camera=savedOverview.current;let inner=0;
+    const raf=requestAnimationFrame(()=>{inner=requestAnimationFrame(()=>{void setViewport(camera,{duration:0});if(savedOverview.current===camera)savedOverview.current=null;});});
+    return ()=>{cancelAnimationFrame(raf);cancelAnimationFrame(inner);};
+  },[focusTarget,setViewport]);
   const revealFiles = useCallback((ids: string[]) => {
     if (!data) return;
     const controller=new AbortController();detailControllers.current.add(controller);
